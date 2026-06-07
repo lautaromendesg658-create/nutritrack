@@ -1,4 +1,4 @@
-const CACHE='nutritrack-v2';
+const CACHE='nutritrack-v3';
 const ASSETS=['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png','./icon-180.png'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));

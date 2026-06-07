@@ -460,7 +460,7 @@ function renderCal(){
     if(hasFood)dots+='<i class="k"></i>';
     if(hasCrea)dots+='<i class="c"></i>';
     grid.insertAdjacentHTML('beforeend',
-      `<div class="day${isToday?' today':''}" data-has="${(hasFood||hasCrea)?1:0}" data-key="${key}">
+      `<div class="day${isToday?' today':''}" data-has="1" data-key="${key}">
         <span class="n">${n}</span><span class="dots">${dots}</span></div>`);
   }
 }
@@ -474,7 +474,7 @@ document.getElementById('calGrid').addEventListener('click',e=>{
 /* ---------- DETALLE DE DÍA ---------- */
 const dayModal=document.getElementById('dayModal');
 function openDay(key){
-  const d=data[key];const [y,m,dd]=key.split('-');
+  const d=data[key]||{foods:[],creatine:false};const [y,m,dd]=key.split('-');
   document.getElementById('dayTitle').textContent=dd+' de '+MES[+m-1];
   const tc=d.foods.reduce((a,f)=>a+ +f.cal,0);
   const tp=d.foods.reduce((a,f)=>a+ +f.pro,0);
