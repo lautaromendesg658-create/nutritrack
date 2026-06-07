@@ -67,8 +67,9 @@
   .crea .txt small{display:block;color:var(--muted);margin-top:2px}
   .crea button{border:none;border-radius:14px;padding:14px 20px;font-weight:800;font-size:15px;
     background:var(--lime);color:#0a0c0a;transition:.2s;min-width:120px}
-  .crea button.done{background:var(--panel-2);color:var(--lime);border:1px solid var(--lime);
-    cursor:default}
+  .crea button.done{background:var(--panel-2);color:var(--lime);border:1px solid var(--lime)}
+  .crea input{width:120px;background:var(--panel-2);border:1px solid var(--line);color:var(--txt);
+    border-radius:14px;padding:14px;font-size:16px;text-align:center;font-weight:700}
 
   /* botones flotantes */
   .fab{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom));
@@ -162,6 +163,24 @@
       <button id="creaBtn">Tomar</button>
     </div>
 
+    <div class="crea">
+      <div class="ico">🏋️</div>
+      <div class="txt"><b>Entrenamiento</b><small id="trainSub">No se registró</small></div>
+      <button id="trainBtn">Marcar</button>
+    </div>
+
+    <div class="crea">
+      <div class="ico">🤸</div>
+      <div class="txt"><b>Actividad</b><small id="actSub">No se registró</small></div>
+      <button id="actBtn">Marcar</button>
+    </div>
+
+    <div class="crea">
+      <div class="ico">👟</div>
+      <div class="txt"><b>Pasos</b><small id="stepsSub">No se registró</small></div>
+      <input id="stepsInput" type="number" inputmode="numeric" min="0" placeholder="0">
+    </div>
+
     <hr>
 
     <div class="table">
@@ -240,7 +259,7 @@
 <div class="modal" id="dayModal">
   <div class="sheet daydetail">
     <h2 id="dayTitle"></h2>
-    <div id="daySummary" style="display:flex;gap:14px;margin-bottom:16px"></div>
+    <div id="daySummary" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px"></div>
     <div class="table">
       <div class="thead"><span>Alimento</span><span>Cal</span><span>Prot</span></div>
       <div id="dayRows"></div>
@@ -287,6 +306,23 @@ function renderHome(){
     document.getElementById('creaSub').textContent='Ya la tomaste hoy 💪';}
   else{btn.textContent='Tomar';btn.classList.remove('done');btn.disabled=false;
     document.getElementById('creaSub').textContent='Marcá si la tomaste hoy';}
+  // entrenamiento
+  const trBtn=document.getElementById('trainBtn');
+  if(d.trained){trBtn.textContent='✓ Entrenado';trBtn.classList.add('done');
+    document.getElementById('trainSub').textContent='Hoy entrenaste 💪';}
+  else{trBtn.textContent='Marcar';trBtn.classList.remove('done');
+    document.getElementById('trainSub').textContent='No se registró';}
+  // actividad
+  const acBtn=document.getElementById('actBtn');
+  if(d.activity){acBtn.textContent='✓ Sí';acBtn.classList.add('done');
+    document.getElementById('actSub').textContent='Hiciste actividad hoy';}
+  else{acBtn.textContent='Marcar';acBtn.classList.remove('done');
+    document.getElementById('actSub').textContent='No se registró';}
+  // pasos
+  const stEl=document.getElementById('stepsInput');
+  const hasSteps=d.steps!==undefined&&d.steps!==null&&d.steps!=='';
+  if(document.activeElement!==stEl)stEl.value=hasSteps?d.steps:'';
+  document.getElementById('stepsSub').textContent=hasSteps?(d.steps+' pasos hoy'):'No se registró';
 }
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -299,6 +335,19 @@ document.getElementById('creaBtn').addEventListener('click',()=>{
   const d=dayOf(todayKey());
   if(d.creatine)return;
   d.creatine=true;save(data);renderHome();
+});
+
+document.getElementById('trainBtn').addEventListener('click',()=>{
+  const d=dayOf(todayKey());d.trained=!d.trained;save(data);renderHome();
+});
+document.getElementById('actBtn').addEventListener('click',()=>{
+  const d=dayOf(todayKey());d.activity=!d.activity;save(data);renderHome();
+});
+document.getElementById('stepsInput').addEventListener('change',()=>{
+  const d=dayOf(todayKey());
+  const v=document.getElementById('stepsInput').value.trim();
+  if(v==='')delete d.steps; else d.steps=Math.max(0,parseInt(v,10)||0);
+  save(data);renderHome();
 });
 
 /* ---------- MODAL AGREGAR ---------- */
@@ -478,10 +527,15 @@ function openDay(key){
   document.getElementById('dayTitle').textContent=dd+' de '+MES[+m-1];
   const tc=d.foods.reduce((a,f)=>a+ +f.cal,0);
   const tp=d.foods.reduce((a,f)=>a+ +f.pro,0);
+  const hasSteps=d.steps!==undefined&&d.steps!==null&&d.steps!=='';
+  const cardCss='padding:12px 14px;flex:1;min-width:88px';
   document.getElementById('daySummary').innerHTML=
-    `<div class="card" style="padding:12px 14px"><div class="lbl">Calorías</div><div style="font-size:22px;font-weight:800;color:var(--lime);margin-top:6px">${tc}</div></div>
-     <div class="card" style="padding:12px 14px"><div class="lbl">Proteína</div><div style="font-size:22px;font-weight:800;color:var(--blue);margin-top:6px">${tp}g</div></div>
-     <div class="card" style="padding:12px 14px"><div class="lbl">Creatina</div><div style="font-size:22px;font-weight:800;margin-top:6px;color:${d.creatine?'var(--lime)':'var(--muted)'}">${d.creatine?'✓':'—'}</div></div>`;
+    `<div class="card" style="${cardCss}"><div class="lbl">Calorías</div><div style="font-size:22px;font-weight:800;color:var(--lime);margin-top:6px">${tc}</div></div>
+     <div class="card" style="${cardCss}"><div class="lbl">Proteína</div><div style="font-size:22px;font-weight:800;color:var(--blue);margin-top:6px">${tp}g</div></div>
+     <div class="card" style="${cardCss}"><div class="lbl">Creatina</div><div style="font-size:22px;font-weight:800;margin-top:6px;color:${d.creatine?'var(--lime)':'var(--muted)'}">${d.creatine?'✓':'—'}</div></div>
+     <div class="card" style="${cardCss}"><div class="lbl">Entreno</div><div style="font-size:22px;font-weight:800;margin-top:6px;color:${d.trained?'var(--lime)':'var(--muted)'}">${d.trained?'✓':'—'}</div></div>
+     <div class="card" style="${cardCss}"><div class="lbl">Actividad</div><div style="font-size:22px;font-weight:800;margin-top:6px;color:${d.activity?'var(--lime)':'var(--muted)'}">${d.activity?'✓':'—'}</div></div>
+     <div class="card" style="${cardCss}"><div class="lbl">Pasos</div><div style="font-size:${hasSteps?'22px':'13px'};font-weight:${hasSteps?'800':'500'};margin-top:6px;color:${hasSteps?'var(--txt)':'var(--muted)'}">${hasSteps?d.steps:'No se registró'}</div></div>`;
   const rows=document.getElementById('dayRows');
   rows.innerHTML=d.foods.length?d.foods.map(f=>`<div class="row">
     <div class="food">${esc(f.name)}</div><div class="cal">${f.cal}</div><div class="pro">${f.pro}g</div></div>`).join('')
