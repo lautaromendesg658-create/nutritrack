@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0c0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NutriTrack">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<title>NutriTrack AI</title>
+<style>
+  :root{
+    --bg:#0a0c0a; --panel:#15171a; --panel-2:#1b1e22; --line:#2a2e34;
+    --lime:#9ee82a; --blue:#2563ff; --txt:#f2f4f0; --muted:#8a9099;
+    --danger:#ff4d4d;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    overscroll-behavior:none}
+  body{padding:env(safe-area-inset-top) 0 0 0;min-height:100vh}
+  .wrap{padding:18px 18px 140px}
+  header{margin-bottom:18px}
+  h1{font-size:34px;font-weight:800;color:var(--lime);letter-spacing:-1px}
+  .sub{font-size:13px;letter-spacing:3px;color:var(--muted);text-transform:uppercase;margin-top:2px}
+
+  .cards{display:flex;gap:14px;margin:18px 0}
+  .card{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px 16px}
+  .card .lbl{font-size:13px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;font-weight:600}
+  .card .val{display:flex;align-items:baseline;gap:6px;margin:14px 0 12px;justify-content:flex-end}
+  .card .big{font-size:30px;font-weight:800}
+  .card .goal{font-size:15px;color:var(--muted)}
+  .bar{height:6px;background:#0c0e10;border-radius:99px;overflow:hidden}
+  .bar > i{display:block;height:100%;background:var(--blue);border-radius:99px;width:0;transition:width .4s}
+
+  hr{border:none;border-top:1px solid var(--line);margin:6px 0 18px}
+
+  .table{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+  .thead,.row{display:grid;grid-template-columns:2.2fr 1.3fr 1.5fr 1.6fr;align-items:center}
+  .thead{padding:16px 14px;border-bottom:1px solid var(--line)}
+  .thead span{font-size:12px;color:var(--muted);text-transform:uppercase;font-weight:600;line-height:1.2}
+  .thead span:nth-child(2),.thead span:nth-child(3){text-align:center}
+  .thead span:nth-child(4){text-align:right}
+  .empty{padding:38px 24px;text-align:center;color:var(--muted);font-style:italic;font-size:16px;line-height:1.4}
+  .row{padding:14px;border-bottom:1px solid var(--line)}
+  .row .food{font-weight:600;font-size:15px}
+  .row .cal{text-align:center;color:var(--lime);font-weight:700}
+  .row .pro{text-align:center;color:var(--blue);font-weight:700}
+  .row .cat{text-align:right;font-size:12px;color:var(--muted)}
+  .row .cat b{display:inline-block;background:var(--panel-2);padding:3px 9px;border-radius:99px;font-weight:500}
+  .delx{margin-left:8px;color:var(--danger);font-weight:700}
+  .totrow{display:grid;grid-template-columns:2.2fr 1.3fr 1.5fr 1.6fr;padding:16px 14px;border-bottom:1px solid var(--line)}
+  .totrow .t{font-size:13px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;font-weight:700;line-height:1.2}
+  .totrow .c{text-align:center;font-size:20px;font-weight:800;color:var(--lime)}
+  .totrow .p{text-align:center;font-size:20px;font-weight:800;color:var(--blue)}
+  .totrow.margin .c,.totrow.margin .p{color:var(--txt)}
+  .totrow.margin{border-bottom:none}
+
+  /* creatina */
+  .crea{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:18px;
+    padding:16px;display:flex;align-items:center;gap:14px}
+  .crea .ico{font-size:26px}
+  .crea .txt{flex:1}
+  .crea .txt b{font-size:16px}
+  .crea .txt small{display:block;color:var(--muted);margin-top:2px}
+  .crea button{border:none;border-radius:14px;padding:14px 20px;font-weight:800;font-size:15px;
+    background:var(--lime);color:#0a0c0a;transition:.2s;min-width:120px}
+  .crea button.done{background:var(--panel-2);color:var(--lime);border:1px solid var(--lime);
+    cursor:default}
+
+  /* botones flotantes */
+  .fab{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom));
+    display:flex;justify-content:center;gap:16px;padding:0 18px;z-index:30}
+  .fab .scan{flex:1;max-width:300px;background:var(--blue);color:#fff;border:2px solid var(--lime);
+    border-radius:99px;padding:18px;font-size:17px;font-weight:800;display:flex;align-items:center;
+    justify-content:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  .fab .add{width:74px;background:var(--lime);color:#0a0c0a;border:none;border-radius:99px;
+    font-size:34px;font-weight:300;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+
+  /* nav inferior */
+  .tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:rgba(10,12,10,.85);
+    backdrop-filter:blur(12px);border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom);z-index:25}
+  .tabs button{flex:1;background:none;border:none;color:var(--muted);padding:12px 0 10px;
+    font-size:11px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px}
+  .tabs button .i{font-size:20px}
+  .tabs button.active{color:var(--lime)}
+
+  /* calendario */
+  .calhead{display:flex;align-items:center;justify-content:space-between;margin:6px 0 18px}
+  .calhead button{background:var(--panel);border:1px solid var(--line);color:var(--txt);
+    width:42px;height:42px;border-radius:12px;font-size:20px}
+  .calhead .mname{font-size:20px;font-weight:800;text-transform:capitalize}
+  .dow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
+  .dow span{text-align:center;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .day{aspect-ratio:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;position:relative}
+  .day.empty{background:none;border:none}
+  .day .n{font-size:14px;font-weight:700}
+  .day.today{border-color:var(--lime)}
+  .day .dots{display:flex;gap:3px;height:6px}
+  .day .dots i{width:5px;height:5px;border-radius:99px;display:block}
+  .day .dots i.k{background:var(--lime)}
+  .day .dots i.c{background:var(--blue)}
+  .day[data-has="1"]{cursor:pointer}
+
+  /* modal */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-end;
+    z-index:50;backdrop-filter:blur(4px)}
+  .modal.open{display:flex}
+  .sheet{background:var(--panel);width:100%;border-radius:24px 24px 0 0;border-top:1px solid var(--line);
+    padding:22px 18px calc(28px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto;
+    animation:up .25s ease}
+  @keyframes up{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  .sheet h2{font-size:20px;margin-bottom:18px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:1px;font-weight:600;margin-bottom:6px}
+  .field input,.field select{width:100%;background:var(--panel-2);border:1px solid var(--line);
+    color:var(--txt);border-radius:12px;padding:14px;font-size:16px}
+  .sheet .save{width:100%;background:var(--lime);color:#0a0c0a;border:none;border-radius:14px;
+    padding:16px;font-size:16px;font-weight:800;margin-top:8px}
+  .sheet .cancel{width:100%;background:none;border:none;color:var(--muted);padding:14px;font-size:15px;margin-top:4px}
+  .daydetail .row{grid-template-columns:2.2fr 1.3fr 1.5fr}
+  .daydetail .thead{grid-template-columns:2.2fr 1.3fr 1.5fr}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>NutriTrack AI</h1>
+    <div class="sub" id="subtitle">Panel de rendimiento diario</div>
+  </header>
+
+  <!-- VISTA HOY -->
+  <section id="view-home">
+    <div class="cards">
+      <div class="card">
+        <div class="lbl">Calorías</div>
+        <div class="val"><span class="big" id="calNow">0</span><span class="goal">/ <span id="calGoal">1900</span></span></div>
+        <div class="bar"><i id="calBar"></i></div>
+      </div>
+      <div class="card">
+        <div class="lbl">Proteína</div>
+        <div class="val"><span class="big" id="proNow">0</span><span class="goal">g / <span id="proGoal">150</span>g</span></div>
+        <div class="bar"><i id="proBar"></i></div>
+      </div>
+    </div>
+
+    <div class="crea">
+      <div class="ico">💊</div>
+      <div class="txt"><b>Creatina</b><small id="creaSub">Marcá si la tomaste hoy</small></div>
+      <button id="creaBtn">Tomar</button>
+    </div>
+
+    <hr>
+
+    <div class="table">
+      <div class="thead">
+        <span>Alimento</span><span>Calorías</span><span>Proteína (g)</span><span>Categoría</span>
+      </div>
+      <div id="rows"></div>
+      <div class="totrow"><span class="t">Total<br>Consumido</span><span class="c" id="totCal">0</span><span class="p" id="totPro">0g</span><span></span></div>
+      <div class="totrow margin"><span class="t">Margen<br>Restante</span><span class="c" id="margCal">1900</span><span class="p" id="margPro">150g</span><span></span></div>
+    </div>
+  </section>
+
+  <!-- VISTA CALENDARIO -->
+  <section id="view-cal" class="hidden">
+    <div class="calhead">
+      <button id="prevM">‹</button>
+      <div class="mname" id="monthName"></div>
+      <button id="nextM">›</button>
+    </div>
+    <div class="dow"><span>Lu</span><span>Ma</span><span>Mi</span><span>Ju</span><span>Vi</span><span>Sa</span><span>Do</span></div>
+    <div class="grid" id="calGrid"></div>
+    <div style="margin-top:18px;display:flex;gap:18px;justify-content:center;color:var(--muted);font-size:12px">
+      <span><i style="display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--lime);margin-right:5px"></i>Comida</span>
+      <span><i style="display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--blue);margin-right:5px"></i>Creatina</span>
+    </div>
+  </section>
+</div>
+
+<!-- FAB -->
+<div class="fab" id="fabBar">
+  <button class="scan" id="scanBtn">📷 Escáner AI ✨</button>
+  <button class="add" id="addBtn">+</button>
+</div>
+
+<!-- TABS -->
+<nav class="tabs">
+  <button data-tab="home" class="active"><span class="i">📊</span>Hoy</button>
+  <button data-tab="cal"><span class="i">📅</span>Calendario</button>
+</nav>
+
+<!-- MODAL agregar -->
+<div class="modal" id="addModal">
+  <div class="sheet">
+    <h2>Añadir alimento</h2>
+    <div class="field"><label>Alimento</label><input id="fName" placeholder="Ej: Pechuga de pollo"></div>
+    <div class="field"><label>Calorías</label><input id="fCal" type="number" inputmode="numeric" placeholder="0"></div>
+    <div class="field"><label>Proteína (g)</label><input id="fPro" type="number" inputmode="numeric" placeholder="0"></div>
+    <div class="field"><label>Categoría</label>
+      <select id="fCat"><option>Desayuno</option><option>Almuerzo</option><option>Merienda</option><option>Cena</option><option>Snack</option></select>
+    </div>
+    <button class="save" id="saveFood">Guardar</button>
+    <button class="cancel" id="cancelFood">Cancelar</button>
+  </div>
+</div>
+
+<!-- MODAL detalle de día -->
+<div class="modal" id="dayModal">
+  <div class="sheet daydetail">
+    <h2 id="dayTitle"></h2>
+    <div id="daySummary" style="display:flex;gap:14px;margin-bottom:16px"></div>
+    <div class="table">
+      <div class="thead"><span>Alimento</span><span>Cal</span><span>Prot</span></div>
+      <div id="dayRows"></div>
+    </div>
+    <button class="cancel" id="closeDay">Cerrar</button>
+  </div>
+</div>
+
+<script>
+const GOAL_CAL=1900, GOAL_PRO=150;
+const todayKey=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const load=()=>{try{return JSON.parse(localStorage.getItem('nutritrack')||'{}')}catch(e){return{}}};
+const save=d=>localStorage.setItem('nutritrack',JSON.stringify(d));
+let data=load();
+const dayOf=k=>{if(!data[k])data[k]={foods:[],creatine:false};return data[k]};
+
+/* ---------- VISTA HOY ---------- */
+function renderHome(){
+  const d=dayOf(todayKey());
+  const rows=document.getElementById('rows');
+  if(d.foods.length===0){
+    rows.innerHTML='<div class="empty">No hay comidas registradas hoy. Escaneá o añadí manualmente.</div>';
+  }else{
+    rows.innerHTML=d.foods.map((f,i)=>`<div class="row">
+      <div class="food">${esc(f.name)}</div>
+      <div class="cal">${f.cal}</div>
+      <div class="pro">${f.pro}g</div>
+      <div class="cat"><b>${esc(f.cat)}</b><span class="delx" data-del="${i}">✕</span></div>
+    </div>`).join('');
+  }
+  const tc=d.foods.reduce((a,f)=>a+ +f.cal,0);
+  const tp=d.foods.reduce((a,f)=>a+ +f.pro,0);
+  document.getElementById('calNow').textContent=tc;
+  document.getElementById('proNow').textContent=tp;
+  document.getElementById('totCal').textContent=tc;
+  document.getElementById('totPro').textContent=tp+'g';
+  document.getElementById('margCal').textContent=Math.max(0,GOAL_CAL-tc);
+  document.getElementById('margPro').textContent=Math.max(0,GOAL_PRO-tp)+'g';
+  document.getElementById('calBar').style.width=Math.min(100,tc/GOAL_CAL*100)+'%';
+  document.getElementById('proBar').style.width=Math.min(100,tp/GOAL_PRO*100)+'%';
+  // creatina
+  const btn=document.getElementById('creaBtn');
+  if(d.creatine){btn.textContent='✓ Tomada';btn.classList.add('done');btn.disabled=true;
+    document.getElementById('creaSub').textContent='Ya la tomaste hoy 💪';}
+  else{btn.textContent='Tomar';btn.classList.remove('done');btn.disabled=false;
+    document.getElementById('creaSub').textContent='Marcá si la tomaste hoy';}
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+document.getElementById('rows').addEventListener('click',e=>{
+  const i=e.target.dataset.del;
+  if(i!==undefined){const d=dayOf(todayKey());d.foods.splice(+i,1);save(data);renderHome();}
+});
+
+document.getElementById('creaBtn').addEventListener('click',()=>{
+  const d=dayOf(todayKey());
+  if(d.creatine)return;
+  d.creatine=true;save(data);renderHome();
+});
+
+/* ---------- MODAL AGREGAR ---------- */
+const addModal=document.getElementById('addModal');
+function openAdd(){addModal.classList.add('open');document.getElementById('fName').focus();}
+function closeAdd(){addModal.classList.remove('open');['fName','fCal','fPro'].forEach(id=>document.getElementById(id).value='');}
+document.getElementById('addBtn').onclick=openAdd;
+document.getElementById('cancelFood').onclick=closeAdd;
+addModal.addEventListener('click',e=>{if(e.target===addModal)closeAdd();});
+document.getElementById('saveFood').onclick=()=>{
+  const name=document.getElementById('fName').value.trim();
+  if(!name)return;
+  const d=dayOf(todayKey());
+  d.foods.push({name,cal:+document.getElementById('fCal').value||0,
+    pro:+document.getElementById('fPro').value||0,cat:document.getElementById('fCat').value});
+  save(data);closeAdd();renderHome();
+};
+document.getElementById('scanBtn').onclick=()=>{
+  alert('El Escáner AI requiere conectar la cámara con la API de Claude.\n\nPor ahora usá el botón + para agregar comidas manualmente. Avisame y lo activamos.');
+};
+
+/* ---------- CALENDARIO ---------- */
+let calDate=new Date();
+const MES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+function renderCal(){
+  const y=calDate.getFullYear(),m=calDate.getMonth();
+  document.getElementById('monthName').textContent=MES[m]+' '+y;
+  const first=new Date(y,m,1);let start=first.getDay();start=start===0?6:start-1; // lunes=0
+  const days=new Date(y,m+1,0).getDate();
+  const grid=document.getElementById('calGrid');grid.innerHTML='';
+  for(let i=0;i<start;i++)grid.insertAdjacentHTML('beforeend','<div class="day empty"></div>');
+  for(let n=1;n<=days;n++){
+    const key=y+'-'+String(m+1).padStart(2,'0')+'-'+String(n).padStart(2,'0');
+    const d=data[key];
+    const hasFood=d&&d.foods&&d.foods.length>0;
+    const hasCrea=d&&d.creatine;
+    const isToday=key===todayKey();
+    let dots='';
+    if(hasFood)dots+='<i class="k"></i>';
+    if(hasCrea)dots+='<i class="c"></i>';
+    grid.insertAdjacentHTML('beforeend',
+      `<div class="day${isToday?' today':''}" data-has="${(hasFood||hasCrea)?1:0}" data-key="${key}">
+        <span class="n">${n}</span><span class="dots">${dots}</span></div>`);
+  }
+}
+document.getElementById('prevM').onclick=()=>{calDate.setMonth(calDate.getMonth()-1);renderCal();};
+document.getElementById('nextM').onclick=()=>{calDate.setMonth(calDate.getMonth()+1);renderCal();};
+document.getElementById('calGrid').addEventListener('click',e=>{
+  const el=e.target.closest('.day');if(!el||el.dataset.has!=='1')return;
+  openDay(el.dataset.key);
+});
+
+/* ---------- DETALLE DE DÍA ---------- */
+const dayModal=document.getElementById('dayModal');
+function openDay(key){
+  const d=data[key];const [y,m,dd]=key.split('-');
+  document.getElementById('dayTitle').textContent=dd+' de '+MES[+m-1];
+  const tc=d.foods.reduce((a,f)=>a+ +f.cal,0);
+  const tp=d.foods.reduce((a,f)=>a+ +f.pro,0);
+  document.getElementById('daySummary').innerHTML=
+    `<div class="card" style="padding:12px 14px"><div class="lbl">Calorías</div><div style="font-size:22px;font-weight:800;color:var(--lime);margin-top:6px">${tc}</div></div>
+     <div class="card" style="padding:12px 14px"><div class="lbl">Proteína</div><div style="font-size:22px;font-weight:800;color:var(--blue);margin-top:6px">${tp}g</div></div>
+     <div class="card" style="padding:12px 14px"><div class="lbl">Creatina</div><div style="font-size:22px;font-weight:800;margin-top:6px;color:${d.creatine?'var(--lime)':'var(--muted)'}">${d.creatine?'✓':'—'}</div></div>`;
+  const rows=document.getElementById('dayRows');
+  rows.innerHTML=d.foods.length?d.foods.map(f=>`<div class="row">
+    <div class="food">${esc(f.name)}</div><div class="cal">${f.cal}</div><div class="pro">${f.pro}g</div></div>`).join('')
+    :'<div class="empty">Sin comidas registradas.</div>';
+  dayModal.classList.add('open');
+}
+document.getElementById('closeDay').onclick=()=>dayModal.classList.remove('open');
+dayModal.addEventListener('click',e=>{if(e.target===dayModal)dayModal.classList.remove('open');});
+
+/* ---------- TABS ---------- */
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  const t=b.dataset.tab;
+  document.getElementById('view-home').classList.toggle('hidden',t!=='home');
+  document.getElementById('view-cal').classList.toggle('hidden',t!=='cal');
+  document.getElementById('fabBar').classList.toggle('hidden',t!=='home');
+  document.getElementById('subtitle').textContent=t==='home'?'Panel de rendimiento diario':'Historial de consumo';
+  if(t==='cal')renderCal();
+});
+
+renderHome();
+if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{});}
+</script>
+</body>
+</html>
