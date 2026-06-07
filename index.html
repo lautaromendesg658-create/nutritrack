@@ -132,8 +132,13 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>NutriTrack AI</h1>
-    <div class="sub" id="subtitle">Panel de rendimiento diario</div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div>
+        <h1>NutriTrack AI</h1>
+        <div class="sub" id="subtitle">Panel de rendimiento diario</div>
+      </div>
+      <button id="settingsBtn" aria-label="Ajustes" style="background:var(--panel);border:1px solid var(--line);color:var(--txt);width:42px;height:42px;border-radius:12px;font-size:20px;flex:0 0 auto">⚙</button>
+    </div>
   </header>
 
   <!-- VISTA HOY -->
@@ -209,6 +214,25 @@
     </div>
     <button class="save" id="saveFood">Guardar</button>
     <button class="cancel" id="cancelFood">Cancelar</button>
+  </div>
+</div>
+
+<!-- input de cámara/galería oculto -->
+<input type="file" id="scanInput" accept="image/*" capture="environment" class="hidden">
+
+<!-- MODAL API key / ajustes -->
+<div class="modal" id="keyModal">
+  <div class="sheet">
+    <h2>Ajustes del Escáner AI</h2>
+    <div class="field"><label>API key de Claude (Anthropic)</label>
+      <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
+    </div>
+    <p style="color:var(--muted);font-size:13px;line-height:1.5;margin-bottom:14px">
+      Se guarda solo en este dispositivo (localStorage). Conseguí tu key en
+      <span style="color:var(--lime)">console.anthropic.com</span>. No la compartas ni la subas al repo.
+    </p>
+    <button class="save" id="saveKey">Guardar</button>
+    <button class="cancel" id="cancelKey">Cancelar</button>
   </div>
 </div>
 
@@ -292,9 +316,129 @@ document.getElementById('saveFood').onclick=()=>{
     pro:+document.getElementById('fPro').value||0,cat:document.getElementById('fCat').value});
   save(data);closeAdd();renderHome();
 };
-document.getElementById('scanBtn').onclick=()=>{
-  alert('El Escáner AI requiere conectar la cámara con la API de Claude.\n\nPor ahora usá el botón + para agregar comidas manualmente. Avisame y lo activamos.');
+/* ---------- ESCÁNER AI ---------- */
+const KEY_STORE='nutritrack_apikey';
+const getKey=()=>localStorage.getItem(KEY_STORE)||'';
+const keyModal=document.getElementById('keyModal');
+function openKeyModal(){
+  document.getElementById('apiKey').value=getKey();
+  keyModal.classList.add('open');
+}
+function closeKeyModal(){keyModal.classList.remove('open');}
+document.getElementById('settingsBtn').onclick=openKeyModal;
+document.getElementById('cancelKey').onclick=closeKeyModal;
+keyModal.addEventListener('click',e=>{if(e.target===keyModal)closeKeyModal();});
+document.getElementById('saveKey').onclick=()=>{
+  const k=document.getElementById('apiKey').value.trim();
+  if(k)localStorage.setItem(KEY_STORE,k); else localStorage.removeItem(KEY_STORE);
+  closeKeyModal();
 };
+
+const scanBtn=document.getElementById('scanBtn');
+const scanInput=document.getElementById('scanInput');
+const scanBtnDefault=scanBtn.innerHTML;
+
+scanBtn.onclick=()=>{
+  if(!getKey()){
+    alert('Primero configurá tu API key de Claude tocando el engranaje ⚙ arriba a la derecha.');
+    openKeyModal();
+    return;
+  }
+  scanInput.value='';
+  scanInput.click();
+};
+
+scanInput.onchange=async()=>{
+  const file=scanInput.files&&scanInput.files[0];
+  if(!file)return;
+  let dataUrl;
+  try{dataUrl=await readAsDataURL(file);}catch(e){alert('No se pudo leer la imagen.');return;}
+  const [meta,b64]=dataUrl.split(',');
+  const mediaType=(meta.match(/data:(.*?);/)||[])[1]||'image/jpeg';
+  scanBtn.disabled=true;
+  scanBtn.innerHTML='⏳ Analizando…';
+  try{
+    const foods=await analyzeFood(b64,mediaType);
+    if(!foods.length){alert('No se detectaron alimentos en la foto. Probá con otra o cargalos con +.');return;}
+    const d=dayOf(todayKey());
+    foods.forEach(f=>d.foods.push(f));
+    save(data);renderHome();
+    const names=foods.map(f=>`• ${f.name} (${f.cal} kcal, ${f.pro}g)`).join('\n');
+    alert('Agregado:\n\n'+names);
+  }catch(err){
+    alert('Error al analizar la foto:\n\n'+(err&&err.message?err.message:err));
+  }finally{
+    scanBtn.disabled=false;
+    scanBtn.innerHTML=scanBtnDefault;
+  }
+};
+
+function readAsDataURL(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>res(r.result);
+    r.onerror=()=>rej(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+const CATS=['Desayuno','Almuerzo','Merienda','Cena','Snack'];
+async function analyzeFood(b64,mediaType){
+  const prompt='Analizá esta foto de comida. Identificá cada alimento o plato visible y estimá, '+
+    'para la porción que se ve en la imagen, las calorías (kcal) y la proteína en gramos. '+
+    'Asigná una categoría según la comida del día más probable. '+
+    'Si no hay comida visible, devolvé una lista vacía.';
+  const body={
+    model:'claude-opus-4-8',
+    max_tokens:1024,
+    messages:[{role:'user',content:[
+      {type:'image',source:{type:'base64',media_type:mediaType,data:b64}},
+      {type:'text',text:prompt}
+    ]}],
+    output_config:{format:{type:'json_schema',schema:{
+      type:'object',
+      properties:{foods:{type:'array',items:{
+        type:'object',
+        properties:{
+          name:{type:'string',description:'Nombre del alimento en español'},
+          cal:{type:'integer',description:'Calorías estimadas (kcal)'},
+          pro:{type:'integer',description:'Proteína estimada en gramos'},
+          cat:{type:'string',enum:CATS}
+        },
+        required:['name','cal','pro','cat'],
+        additionalProperties:false
+      }}},
+      required:['foods'],
+      additionalProperties:false
+    }}}
+  };
+  const resp=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'content-type':'application/json',
+      'x-api-key':getKey(),
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true'
+    },
+    body:JSON.stringify(body)
+  });
+  if(!resp.ok){
+    let msg='HTTP '+resp.status;
+    try{const e=await resp.json();if(e&&e.error&&e.error.message)msg=e.error.message;}catch(_){}
+    if(resp.status===401)msg='API key inválida. Revisala en ⚙.';
+    throw new Error(msg);
+  }
+  const out=await resp.json();
+  const txt=(out.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+  let parsed;
+  try{parsed=JSON.parse(txt);}catch(e){throw new Error('Respuesta inesperada del modelo.');}
+  return (parsed.foods||[]).map(f=>({
+    name:String(f.name||'Alimento'),
+    cal:+f.cal||0,
+    pro:+f.pro||0,
+    cat:CATS.includes(f.cat)?f.cat:'Snack'
+  }));
+}
 
 /* ---------- CALENDARIO ---------- */
 let calDate=new Date();
