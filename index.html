@@ -3,562 +3,1121 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0a0c0a">
+<meta name="theme-color" content="#0b0d12">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="NutriTrack">
+<meta name="apple-mobile-web-app-title" content="PrestaControl">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icon-180.png">
-<title>NutriTrack AI</title>
+<link rel="icon" type="image/png" href="./icon-192.png">
+<title>PrestaControl — Gestión de Préstamos</title>
 <style>
   :root{
-    --bg:#0a0c0a; --panel:#15171a; --panel-2:#1b1e22; --line:#2a2e34;
-    --lime:#9ee82a; --blue:#2563ff; --txt:#f2f4f0; --muted:#8a9099;
-    --danger:#ff4d4d;
+    --bg:#0b0d12; --panel:#151821; --panel-2:#1c2030; --line:#2a3042;
+    --gold:#f5c84c; --green:#3ddc84; --blue:#4d8dff; --red:#ff5d5d; --orange:#ff9f43;
+    --txt:#f1f3f7; --muted:#8b93a7;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
   html,body{background:var(--bg);color:var(--txt);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    overscroll-behavior:none}
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overscroll-behavior:none}
   body{padding:env(safe-area-inset-top) 0 0 0;min-height:100vh}
-  .wrap{padding:18px 18px 140px}
-  header{margin-bottom:18px}
-  h1{font-size:34px;font-weight:800;color:var(--lime);letter-spacing:-1px}
-  .sub{font-size:13px;letter-spacing:3px;color:var(--muted);text-transform:uppercase;margin-top:2px}
+  .wrap{padding:16px 16px 120px;max-width:980px;margin:0 auto}
+  @media(min-width:700px){.wrap{padding-top:24px}}
 
-  .cards{display:flex;gap:14px;margin:18px 0}
-  .card{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px 16px}
-  .card .lbl{font-size:13px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;font-weight:600}
-  .card .val{display:flex;align-items:baseline;gap:6px;margin:14px 0 12px;justify-content:flex-end}
-  .card .big{font-size:30px;font-weight:800}
-  .card .goal{font-size:15px;color:var(--muted)}
-  .bar{height:6px;background:#0c0e10;border-radius:99px;overflow:hidden}
-  .bar > i{display:block;height:100%;background:var(--blue);border-radius:99px;width:0;transition:width .4s}
+  header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;gap:10px}
+  h1{font-size:26px;font-weight:800;color:var(--gold);letter-spacing:-.5px;line-height:1.1}
+  .sub{font-size:11px;letter-spacing:2.5px;color:var(--muted);text-transform:uppercase;margin-top:3px}
+  .clockbox{text-align:right;flex-shrink:0}
+  .clock{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--txt)}
+  .clock small{font-size:14px;color:var(--gold)}
+  .cdate{font-size:11px;color:var(--muted);text-transform:capitalize;margin-top:2px}
+  .syncdot{display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--muted);margin-right:5px;vertical-align:1px}
+  .syncdot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .syncdot.err{background:var(--red)}
+  .syncline{font-size:10px;color:var(--muted);margin-top:3px}
 
-  hr{border:none;border-top:1px solid var(--line);margin:6px 0 18px}
+  /* tarjetas dashboard */
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0}
+  @media(min-width:700px){.stats{grid-template-columns:repeat(4,1fr)}}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}
+  .stat .lbl{font-size:11px;letter-spacing:.8px;color:var(--muted);text-transform:uppercase;font-weight:600}
+  .stat .val{font-size:22px;font-weight:800;margin-top:7px;font-variant-numeric:tabular-nums}
+  .stat .ex{font-size:11px;color:var(--muted);margin-top:3px}
+  .stat.gold .val{color:var(--gold)} .stat.green .val{color:var(--green)}
+  .stat.blue .val{color:var(--blue)} .stat.red .val{color:var(--red)}
+  .stat.orange .val{color:var(--orange)}
 
-  .table{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden}
-  .thead,.row{display:grid;grid-template-columns:2.2fr 1.3fr 1.5fr 1.6fr;align-items:center}
-  .thead{padding:16px 14px;border-bottom:1px solid var(--line)}
-  .thead span{font-size:12px;color:var(--muted);text-transform:uppercase;font-weight:600;line-height:1.2}
-  .thead span:nth-child(2),.thead span:nth-child(3){text-align:center}
-  .thead span:nth-child(4){text-align:right}
-  .empty{padding:38px 24px;text-align:center;color:var(--muted);font-style:italic;font-size:16px;line-height:1.4}
-  .row{padding:14px;border-bottom:1px solid var(--line)}
-  .row .food{font-weight:600;font-size:15px}
-  .row .cal{text-align:center;color:var(--lime);font-weight:700}
-  .row .pro{text-align:center;color:var(--blue);font-weight:700}
-  .row .cat{text-align:right;font-size:12px;color:var(--muted)}
-  .row .cat b{display:inline-block;background:var(--panel-2);padding:3px 9px;border-radius:99px;font-weight:500}
-  .delx{margin-left:8px;color:var(--danger);font-weight:700}
-  .totrow{display:grid;grid-template-columns:2.2fr 1.3fr 1.5fr 1.6fr;padding:16px 14px;border-bottom:1px solid var(--line)}
-  .totrow .t{font-size:13px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;font-weight:700;line-height:1.2}
-  .totrow .c{text-align:center;font-size:20px;font-weight:800;color:var(--lime)}
-  .totrow .p{text-align:center;font-size:20px;font-weight:800;color:var(--blue)}
-  .totrow.margin .c,.totrow.margin .p{color:var(--txt)}
-  .totrow.margin{border-bottom:none}
+  h2{font-size:16px;font-weight:800;margin:20px 0 10px;display:flex;align-items:center;gap:8px}
+  h2 .cnt{background:var(--panel-2);color:var(--muted);font-size:12px;padding:2px 9px;border-radius:99px;font-weight:700}
 
-  /* creatina */
-  .crea{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:18px;
-    padding:16px;display:flex;align-items:center;gap:14px}
-  .crea .ico{font-size:26px}
-  .crea .txt{flex:1}
-  .crea .txt b{font-size:16px}
-  .crea .txt small{display:block;color:var(--muted);margin-top:2px}
-  .crea button{border:none;border-radius:14px;padding:14px 20px;font-weight:800;font-size:15px;
-    background:var(--lime);color:#0a0c0a;transition:.2s;min-width:120px}
-  .crea button.done{background:var(--panel-2);color:var(--lime);border:1px solid var(--lime)}
-  .crea input{width:120px;background:var(--panel-2);border:1px solid var(--line);color:var(--txt);
-    border-radius:14px;padding:14px;font-size:16px;text-align:center;font-weight:700}
+  .list{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .item{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+  .item:last-child{border-bottom:none}
+  .item:active{background:var(--panel-2)}
+  .ava{width:42px;height:42px;border-radius:13px;background:var(--panel-2);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:var(--gold);flex-shrink:0}
+  .ava.shop{color:var(--blue)}
+  .item .mid{flex:1;min-width:0}
+  .item .t1{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .t2{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .end{text-align:right;flex-shrink:0}
+  .item .m1{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+  .item .m2{font-size:11px;color:var(--muted);margin-top:2px}
+  .empty{padding:34px 20px;text-align:center;color:var(--muted);font-style:italic;font-size:14px;line-height:1.5}
 
-  /* botones flotantes */
-  .fab{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom));
-    display:flex;justify-content:center;gap:16px;padding:0 18px;z-index:30}
-  .fab .scan{flex:1;max-width:300px;background:var(--blue);color:#fff;border:2px solid var(--lime);
-    border-radius:99px;padding:18px;font-size:17px;font-weight:800;display:flex;align-items:center;
-    justify-content:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
-  .fab .add{width:74px;background:var(--lime);color:#0a0c0a;border:none;border-radius:99px;
-    font-size:34px;font-weight:300;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  .badge{display:inline-block;font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;
+    text-transform:uppercase;letter-spacing:.5px}
+  .b-per{background:rgba(245,200,76,.13);color:var(--gold)}
+  .b-com{background:rgba(77,141,255,.15);color:var(--blue)}
+  .b-ok{background:rgba(61,220,132,.13);color:var(--green)}
+  .b-hoy{background:rgba(245,200,76,.15);color:var(--gold)}
+  .b-ven{background:rgba(255,93,93,.15);color:var(--red)}
+  .b-fut{background:var(--panel-2);color:var(--muted)}
+  .b-cob{background:rgba(255,159,67,.15);color:var(--orange)}
 
-  /* nav inferior */
-  .tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:rgba(10,12,10,.85);
-    backdrop-filter:blur(12px);border-top:1px solid var(--line);
-    padding-bottom:env(safe-area-inset-bottom);z-index:25}
-  .tabs button{flex:1;background:none;border:none;color:var(--muted);padding:12px 0 10px;
-    font-size:11px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px}
-  .tabs button .i{font-size:20px}
-  .tabs button.active{color:var(--lime)}
+  button{font-family:inherit;cursor:pointer}
+  .btn{border:none;border-radius:13px;padding:13px 18px;font-weight:800;font-size:14px;
+    background:var(--gold);color:#14110a;width:100%;transition:.15s}
+  .btn:active{transform:scale(.98)}
+  .btn.sec{background:var(--panel-2);color:var(--txt);border:1px solid var(--line)}
+  .btn.green{background:var(--green);color:#06160d}
+  .btn.red{background:rgba(255,93,93,.13);color:var(--red);border:1px solid rgba(255,93,93,.3)}
+  .btn.blue{background:var(--blue);color:#fff}
+  .btn.mini{width:auto;padding:8px 14px;font-size:12px;border-radius:10px}
+  .btnrow{display:flex;gap:10px;margin-top:10px}
+  .btnrow .btn{flex:1}
 
-  /* calendario */
-  .calhead{display:flex;align-items:center;justify-content:space-between;margin:6px 0 18px}
-  .calhead button{background:var(--panel);border:1px solid var(--line);color:var(--txt);
-    width:42px;height:42px;border-radius:12px;font-size:20px}
-  .calhead .mname{font-size:20px;font-weight:800;text-transform:capitalize}
-  .dow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
-  .dow span{text-align:center;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700}
-  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-  .day{aspect-ratio:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;position:relative}
-  .day.empty{background:none;border:none}
-  .day .n{font-size:14px;font-weight:700}
-  .day.today{border-color:var(--lime)}
-  .day .dots{display:flex;gap:3px;height:6px}
-  .day .dots i{width:5px;height:5px;border-radius:99px;display:block}
-  .day .dots i.k{background:var(--lime)}
-  .day .dots i.c{background:var(--blue)}
-  .day[data-has="1"]{cursor:pointer}
+  /* formularios */
+  label{display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.6px;margin:14px 0 6px}
+  input,select,textarea{width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--txt);
+    border-radius:12px;padding:13px;font-size:16px;font-family:inherit;outline:none}
+  input:focus,select:focus,textarea:focus{border-color:var(--gold)}
+  textarea{resize:vertical;min-height:70px}
+  .frow{display:flex;gap:10px}.frow>div{flex:1}
+  .seg{display:flex;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px}
+  .seg button{flex:1;background:none;border:none;color:var(--muted);padding:10px 4px;border-radius:9px;
+    font-weight:700;font-size:13px}
+  .seg button.on{background:var(--gold);color:#14110a}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
+  .resume{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+    margin-top:14px;font-size:14px;line-height:1.8}
+  .resume b{color:var(--gold)}
 
   /* modal */
-  .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-end;
-    z-index:50;backdrop-filter:blur(4px)}
-  .modal.open{display:flex}
-  .sheet{background:var(--panel);width:100%;border-radius:24px 24px 0 0;border-top:1px solid var(--line);
-    padding:22px 18px calc(28px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto;
-    animation:up .25s ease}
-  @keyframes up{from{transform:translateY(100%)}to{transform:translateY(0)}}
-  .sheet h2{font-size:20px;margin-bottom:18px}
-  .field{margin-bottom:14px}
-  .field label{display:block;font-size:12px;color:var(--muted);text-transform:uppercase;
-    letter-spacing:1px;font-weight:600;margin-bottom:6px}
-  .field input,.field select{width:100%;background:var(--panel-2);border:1px solid var(--line);
-    color:var(--txt);border-radius:12px;padding:14px;font-size:16px}
-  .sheet .save{width:100%;background:var(--lime);color:#0a0c0a;border:none;border-radius:14px;
-    padding:16px;font-size:16px;font-weight:800;margin-top:8px}
-  .sheet .cancel{width:100%;background:none;border:none;color:var(--muted);padding:14px;font-size:15px;margin-top:4px}
-  .daydetail .row{grid-template-columns:2.2fr 1.3fr 1.5fr}
-  .daydetail .thead{grid-template-columns:2.2fr 1.3fr 1.5fr}
-  .hidden{display:none!important}
+  .ovl{position:fixed;inset:0;background:rgba(5,6,10,.78);backdrop-filter:blur(4px);z-index:50;
+    display:flex;align-items:flex-end;justify-content:center}
+  @media(min-width:700px){.ovl{align-items:center}}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:22px 22px 0 0;width:100%;
+    max-width:560px;max-height:92vh;overflow-y:auto;padding:20px 18px calc(24px + env(safe-area-inset-bottom))}
+  @media(min-width:700px){.sheet{border-radius:22px}}
+  .sheet h3{font-size:18px;font-weight:800;margin-bottom:4px}
+  .sheet .x{position:sticky;float:right;top:0;background:var(--panel-2);border:1px solid var(--line);
+    color:var(--muted);width:34px;height:34px;border-radius:99px;font-size:16px;font-weight:700}
+
+  /* calendario */
+  .calhead{display:flex;align-items:center;justify-content:space-between;margin:8px 0 14px}
+  .calhead button{background:var(--panel);border:1px solid var(--line);color:var(--txt);
+    width:40px;height:40px;border-radius:12px;font-size:18px}
+  .calhead .mname{font-size:18px;font-weight:800;text-transform:capitalize}
+  .dow{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:5px}
+  .dow span{text-align:center;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700}
+  .cgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .cday{aspect-ratio:.92;background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:13px;
+    font-weight:600;cursor:pointer;position:relative;min-width:0}
+  .cday.off{opacity:.28}
+  .cday.today{border-color:var(--gold);color:var(--gold)}
+  .cday.sel{background:var(--panel-2);border-color:var(--gold)}
+  .cday .amt{font-size:8.5px;font-weight:700;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px}
+  .cday .dots{display:flex;gap:3px}
+  .cday .dot{width:6px;height:6px;border-radius:99px}
+  .d-ok{background:var(--green)} .d-ven{background:var(--red)} .d-pen{background:var(--blue)} .d-hoy{background:var(--gold)}
+
+  /* docs */
+  .docgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
+  .doc{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    aspect-ratio:1;position:relative;cursor:pointer}
+  .doc img{width:100%;height:100%;object-fit:cover}
+  .doc .pdf{display:flex;align-items:center;justify-content:center;height:100%;font-size:30px}
+  .doc .nm{position:absolute;left:0;right:0;bottom:0;background:rgba(5,6,10,.75);font-size:9px;
+    padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* cuotas */
+  .cuota{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .cuota:last-child{border-bottom:none}
+  .cuota .num{width:34px;height:34px;border-radius:10px;background:var(--panel-2);display:flex;
+    align-items:center;justify-content:center;font-weight:800;font-size:13px;color:var(--muted);flex-shrink:0}
+  .cuota.pg .num{background:rgba(61,220,132,.13);color:var(--green)}
+  .cuota.vn .num{background:rgba(255,93,93,.13);color:var(--red)}
+  .cuota.hy .num{background:rgba(245,200,76,.15);color:var(--gold)}
+
+  .chips{display:flex;gap:8px;margin:12px 0;overflow-x:auto;padding-bottom:2px}
+  .chips button{background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:8px 15px;
+    border-radius:99px;font-weight:700;font-size:13px;white-space:nowrap}
+  .chips button.on{background:var(--gold);color:#14110a;border-color:var(--gold)}
+
+  .search{position:relative;margin:12px 0}
+  .search input{padding-left:38px}
+  .search:before{content:"🔍";position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;opacity:.6}
+
+  .back{background:none;border:none;color:var(--gold);font-weight:800;font-size:14px;padding:4px 0;margin-bottom:8px}
+  .fab{position:fixed;right:18px;bottom:calc(78px + env(safe-area-inset-bottom));width:60px;height:60px;
+    border-radius:99px;background:var(--gold);color:#14110a;border:none;font-size:30px;font-weight:300;
+    box-shadow:0 8px 28px rgba(0,0,0,.55);z-index:30;display:none}
+  .progress{height:6px;background:#0d0f15;border-radius:99px;overflow:hidden;margin-top:8px}
+  .progress i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .3s}
+
+  .tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:rgba(11,13,18,.88);
+    backdrop-filter:blur(12px);border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom);z-index:25}
+  .tabs button{flex:1;background:none;border:none;color:var(--muted);padding:11px 0 9px;
+    font-size:10px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px}
+  .tabs button .i{font-size:20px}
+  .tabs button.active{color:var(--gold)}
+
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px}
+  summary{font-weight:700;font-size:13px;cursor:pointer;color:var(--gold)}
+  details ol{margin:10px 0 4px 18px;font-size:13px;line-height:1.7;color:var(--txt)}
+  details code{background:#0d0f15;padding:2px 5px;border-radius:5px;font-size:11px;display:inline-block;max-width:100%;overflow-x:auto;white-space:pre;vertical-align:middle}
+  pre.rules{background:#0d0f15;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:10.5px;
+    overflow-x:auto;margin:8px 0;line-height:1.5}
+  .wamsg{color:#25D366;font-weight:800}
+
+  /* pantalla de bloqueo */
+  #lock{position:fixed;inset:0;background:var(--bg);z-index:100;display:none;
+    align-items:center;justify-content:center;padding:24px}
+  #lock.show{display:flex}
+  .lockbox{width:100%;max-width:380px}
+  .lockbox .logo{text-align:center;margin-bottom:26px}
+  .lockbox .logo .ic{font-size:46px}
+  .lockbox h1{font-size:28px;text-align:center}
+  .lockbox .sub{text-align:center}
+  .lockerr{color:var(--red);font-size:13px;font-weight:700;text-align:center;margin-top:12px;min-height:18px}
+  .lockfoot{text-align:center;margin-top:22px}
+  .lockfoot button{background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <div style="display:flex;align-items:flex-start;justify-content:space-between">
-      <div>
-        <h1>NutriTrack AI</h1>
-        <div class="sub" id="subtitle">Panel de rendimiento diario</div>
-      </div>
-      <button id="settingsBtn" aria-label="Ajustes" style="background:var(--panel);border:1px solid var(--line);color:var(--txt);width:42px;height:42px;border-radius:12px;font-size:20px;flex:0 0 auto">⚙</button>
+    <div>
+      <h1 id="bizname">PrestaControl</h1>
+      <div class="sub">Gestión de préstamos</div>
+    </div>
+    <div class="clockbox">
+      <div class="clock" id="clock">--:--<small>:--</small></div>
+      <div class="cdate" id="cdate"></div>
+      <div class="syncline"><span class="syncdot" id="syncdot"></span><span id="synctxt">Sin sincronizar</span></div>
     </div>
   </header>
-
-  <!-- VISTA HOY -->
-  <section id="view-home">
-    <div class="cards">
-      <div class="card">
-        <div class="lbl">Calorías</div>
-        <div class="val"><span class="big" id="calNow">0</span><span class="goal">/ <span id="calGoal">1900</span></span></div>
-        <div class="bar"><i id="calBar"></i></div>
-      </div>
-      <div class="card">
-        <div class="lbl">Proteína</div>
-        <div class="val"><span class="big" id="proNow">0</span><span class="goal">g / <span id="proGoal">150</span>g</span></div>
-        <div class="bar"><i id="proBar"></i></div>
-      </div>
-    </div>
-
-    <div class="crea">
-      <div class="ico">💊</div>
-      <div class="txt"><b>Creatina</b><small id="creaSub">Marcá si la tomaste hoy</small></div>
-      <button id="creaBtn">Tomar</button>
-    </div>
-
-    <div class="crea">
-      <div class="ico">🏋️</div>
-      <div class="txt"><b>Entrenamiento</b><small id="trainSub">No se registró</small></div>
-      <button id="trainBtn">Marcar</button>
-    </div>
-
-    <div class="crea">
-      <div class="ico">🤸</div>
-      <div class="txt"><b>Actividad</b><small id="actSub">No se registró</small></div>
-      <button id="actBtn">Marcar</button>
-    </div>
-
-    <div class="crea">
-      <div class="ico">👟</div>
-      <div class="txt"><b>Pasos</b><small id="stepsSub">No se registró</small></div>
-      <input id="stepsInput" type="number" inputmode="numeric" min="0" placeholder="0">
-    </div>
-
-    <hr>
-
-    <div class="table">
-      <div class="thead">
-        <span>Alimento</span><span>Calorías</span><span>Proteína (g)</span><span>Categoría</span>
-      </div>
-      <div id="rows"></div>
-      <div class="totrow"><span class="t">Total<br>Consumido</span><span class="c" id="totCal">0</span><span class="p" id="totPro">0g</span><span></span></div>
-      <div class="totrow margin"><span class="t">Margen<br>Restante</span><span class="c" id="margCal">1900</span><span class="p" id="margPro">150g</span><span></span></div>
-    </div>
-  </section>
-
-  <!-- VISTA CALENDARIO -->
-  <section id="view-cal" class="hidden">
-    <div class="calhead">
-      <button id="prevM">‹</button>
-      <div class="mname" id="monthName"></div>
-      <button id="nextM">›</button>
-    </div>
-    <div class="dow"><span>Lu</span><span>Ma</span><span>Mi</span><span>Ju</span><span>Vi</span><span>Sa</span><span>Do</span></div>
-    <div class="grid" id="calGrid"></div>
-    <div style="margin-top:18px;display:flex;gap:18px;justify-content:center;color:var(--muted);font-size:12px">
-      <span><i style="display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--lime);margin-right:5px"></i>Comida</span>
-      <span><i style="display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--blue);margin-right:5px"></i>Creatina</span>
-    </div>
-  </section>
+  <main id="view"></main>
 </div>
 
-<!-- FAB -->
-<div class="fab" id="fabBar">
-  <button class="scan" id="scanBtn">📷 Escáner AI ✨</button>
-  <button class="add" id="addBtn">+</button>
-</div>
+<button class="fab" id="fab">+</button>
 
-<!-- TABS -->
 <nav class="tabs">
-  <button data-tab="home" class="active"><span class="i">📊</span>Hoy</button>
-  <button data-tab="cal"><span class="i">📅</span>Calendario</button>
+  <button data-v="inicio" class="active"><span class="i">📊</span>Inicio</button>
+  <button data-v="clientes"><span class="i">👥</span>Clientes</button>
+  <button data-v="prestamos"><span class="i">💵</span>Préstamos</button>
+  <button data-v="calendario"><span class="i">📅</span>Calendario</button>
+  <button data-v="ajustes"><span class="i">⚙️</span>Ajustes</button>
 </nav>
 
-<!-- MODAL agregar -->
-<div class="modal" id="addModal">
-  <div class="sheet">
-    <h2>Añadir alimento</h2>
-    <div class="field"><label>Alimento</label><input id="fName" placeholder="Ej: Pechuga de pollo"></div>
-    <div class="field"><label>Calorías</label><input id="fCal" type="number" inputmode="numeric" placeholder="0"></div>
-    <div class="field"><label>Proteína (g)</label><input id="fPro" type="number" inputmode="numeric" placeholder="0"></div>
-    <div class="field"><label>Categoría</label>
-      <select id="fCat"><option>Desayuno</option><option>Almuerzo</option><option>Merienda</option><option>Cena</option><option>Snack</option></select>
-    </div>
-    <button class="save" id="saveFood">Guardar</button>
-    <button class="cancel" id="cancelFood">Cancelar</button>
-  </div>
-</div>
-
-<!-- input de cámara/galería oculto -->
-<input type="file" id="scanInput" accept="image/*" capture="environment" class="hidden">
-
-<!-- MODAL API key / ajustes -->
-<div class="modal" id="keyModal">
-  <div class="sheet">
-    <h2>Ajustes del Escáner AI</h2>
-    <div class="field"><label>API key de Claude (Anthropic)</label>
-      <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
-    </div>
-    <p style="color:var(--muted);font-size:13px;line-height:1.5;margin-bottom:14px">
-      Se guarda solo en este dispositivo (localStorage). Conseguí tu key en
-      <span style="color:var(--lime)">console.anthropic.com</span>. No la compartas ni la subas al repo.
-    </p>
-    <button class="save" id="saveKey">Guardar</button>
-    <button class="cancel" id="cancelKey">Cancelar</button>
-  </div>
-</div>
-
-<!-- MODAL detalle de día -->
-<div class="modal" id="dayModal">
-  <div class="sheet daydetail">
-    <h2 id="dayTitle"></h2>
-    <div id="daySummary" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px"></div>
-    <div class="table">
-      <div class="thead"><span>Alimento</span><span>Cal</span><span>Prot</span></div>
-      <div id="dayRows"></div>
-    </div>
-    <button class="cancel" id="closeDay">Cerrar</button>
-  </div>
-</div>
+<div id="modal"></div>
+<div id="lock"></div>
 
 <script>
-const GOAL_CAL=1900, GOAL_PRO=150;
-const todayKey=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
-const load=()=>{try{return JSON.parse(localStorage.getItem('nutritrack')||'{}')}catch(e){return{}}};
-const save=d=>localStorage.setItem('nutritrack',JSON.stringify(d));
-let data=load();
-const dayOf=k=>{if(!data[k])data[k]={foods:[],creatine:false};return data[k]};
+/* ================= ESTADO ================= */
+const LS='prestacontrol-v1';
+const DEF_SETTINGS={
+  nombreNegocio:'Mi Negocio', moneda:'$',
+  mora:{tipo:'pct', valor:10, porDia:false}, horaLimite:18,
+  cobrador:{monto:0, dias:3},
+  updatedAt:0
+};
+let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[]};
+try{const raw=localStorage.getItem(LS); if(raw){const p=JSON.parse(raw);
+  S={settings:{...DEF_SETTINGS,...p.settings,
+     mora:{...DEF_SETTINGS.mora,...(p.settings&&p.settings.mora||{})},
+     cobrador:{...DEF_SETTINGS.cobrador,...(p.settings&&p.settings.cobrador||{})}},
+    clients:p.clients||[], loans:p.loans||[], docs:p.docs||[]};}}catch(e){}
 
-/* ---------- VISTA HOY ---------- */
-function renderHome(){
-  const d=dayOf(todayKey());
-  const rows=document.getElementById('rows');
-  if(d.foods.length===0){
-    rows.innerHTML='<div class="empty">No hay comidas registradas hoy. Escaneá o añadí manualmente.</div>';
-  }else{
-    rows.innerHTML=d.foods.map((f,i)=>`<div class="row">
-      <div class="food">${esc(f.name)}</div>
-      <div class="cal">${f.cal}</div>
-      <div class="pro">${f.pro}g</div>
-      <div class="cat"><b>${esc(f.cat)}</b><span class="delx" data-del="${i}">✕</span></div>
-    </div>`).join('');
-  }
-  const tc=d.foods.reduce((a,f)=>a+ +f.cal,0);
-  const tp=d.foods.reduce((a,f)=>a+ +f.pro,0);
-  document.getElementById('calNow').textContent=tc;
-  document.getElementById('proNow').textContent=tp;
-  document.getElementById('totCal').textContent=tc;
-  document.getElementById('totPro').textContent=tp+'g';
-  document.getElementById('margCal').textContent=Math.max(0,GOAL_CAL-tc);
-  document.getElementById('margPro').textContent=Math.max(0,GOAL_PRO-tp)+'g';
-  document.getElementById('calBar').style.width=Math.min(100,tc/GOAL_CAL*100)+'%';
-  document.getElementById('proBar').style.width=Math.min(100,tp/GOAL_PRO*100)+'%';
-  // creatina
-  const btn=document.getElementById('creaBtn');
-  if(d.creatine){btn.textContent='✓ Tomada';btn.classList.add('done');btn.disabled=true;
-    document.getElementById('creaSub').textContent='Ya la tomaste hoy 💪';}
-  else{btn.textContent='Tomar';btn.classList.remove('done');btn.disabled=false;
-    document.getElementById('creaSub').textContent='Marcá si la tomaste hoy';}
-  // entrenamiento
-  const trBtn=document.getElementById('trainBtn');
-  if(d.trained){trBtn.textContent='✓ Entrenado';trBtn.classList.add('done');
-    document.getElementById('trainSub').textContent='Hoy entrenaste 💪';}
-  else{trBtn.textContent='Marcar';trBtn.classList.remove('done');
-    document.getElementById('trainSub').textContent='No se registró';}
-  // actividad
-  const acBtn=document.getElementById('actBtn');
-  if(d.activity){acBtn.textContent='✓ Sí';acBtn.classList.add('done');
-    document.getElementById('actSub').textContent='Hiciste actividad hoy';}
-  else{acBtn.textContent='Marcar';acBtn.classList.remove('done');
-    document.getElementById('actSub').textContent='No se registró';}
-  // pasos
-  const stEl=document.getElementById('stepsInput');
-  const hasSteps=d.steps!==undefined&&d.steps!==null&&d.steps!=='';
-  if(document.activeElement!==stEl)stEl.value=hasSteps?d.steps:'';
-  document.getElementById('stepsSub').textContent=hasSteps?(d.steps+' pasos hoy'):'No se registró';
+function persist(){try{localStorage.setItem(LS,JSON.stringify(S));}catch(e){
+  if((e+'').includes('uota'))alert('Atención: el almacenamiento local está lleno. Borrá documentos viejos o activá la sincronización.');}}
+
+/* ================= UTILS ================= */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const DAY=86400000;
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function fmt$(n){n=Math.round(n||0);return S.settings.moneda+' '+n.toLocaleString('es-AR');}
+function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+const todayStr=()=>ymd(new Date());
+function pd(s){const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d,12,0,0);}
+function dueAt(s){const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d,S.settings.horaLimite||18,0,0);}
+function dShort(s){const d=pd(s);return d.toLocaleDateString('es-AR',{day:'numeric',month:'short'});}
+function dLong(s){const d=pd(s);return d.toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});}
+const client=id=>S.clients.find(c=>c.id===id);
+const loan=id=>S.loans.find(l=>l.id===id);
+const FREQ={diaria:'Diaria',semanal:'Semanal',quincenal:'Quincenal'};
+const FREQ_DAYS={diaria:1,semanal:7,quincenal:15};
+
+/* ================= LÓGICA DE CUOTAS / MORA ================= */
+function cPagadoBase(c){return (c.pagos||[]).reduce((a,p)=>a+(p.monto||0),0);}
+function cMoraPagada(c){return (c.pagos||[]).reduce((a,p)=>a+(p.mora||0),0);}
+function cCobradorPagado(c){return (c.pagos||[]).reduce((a,p)=>a+(p.cobrador||0),0);}
+function cRestante(c){return Math.max(0,c.monto-cPagadoBase(c));}
+function diasAtraso(c){ // días de mora: 1 = pasó la hora límite del día de vencimiento
+  if(cRestante(c)<=0)return 0;
+  const lim=dueAt(c.vence).getTime(), now=Date.now();
+  if(now<=lim)return 0;
+  return Math.floor((now-lim)/DAY)+1;
 }
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-
-document.getElementById('rows').addEventListener('click',e=>{
-  const i=e.target.dataset.del;
-  if(i!==undefined){const d=dayOf(todayKey());d.foods.splice(+i,1);save(data);renderHome();}
-});
-
-document.getElementById('creaBtn').addEventListener('click',()=>{
-  const d=dayOf(todayKey());
-  if(d.creatine)return;
-  d.creatine=true;save(data);renderHome();
-});
-
-document.getElementById('trainBtn').addEventListener('click',()=>{
-  const d=dayOf(todayKey());d.trained=!d.trained;save(data);renderHome();
-});
-document.getElementById('actBtn').addEventListener('click',()=>{
-  const d=dayOf(todayKey());d.activity=!d.activity;save(data);renderHome();
-});
-document.getElementById('stepsInput').addEventListener('change',()=>{
-  const d=dayOf(todayKey());
-  const v=document.getElementById('stepsInput').value.trim();
-  if(v==='')delete d.steps; else d.steps=Math.max(0,parseInt(v,10)||0);
-  save(data);renderHome();
-});
-
-/* ---------- MODAL AGREGAR ---------- */
-const addModal=document.getElementById('addModal');
-function openAdd(){addModal.classList.add('open');document.getElementById('fName').focus();}
-function closeAdd(){addModal.classList.remove('open');['fName','fCal','fPro'].forEach(id=>document.getElementById(id).value='');}
-document.getElementById('addBtn').onclick=openAdd;
-document.getElementById('cancelFood').onclick=closeAdd;
-addModal.addEventListener('click',e=>{if(e.target===addModal)closeAdd();});
-document.getElementById('saveFood').onclick=()=>{
-  const name=document.getElementById('fName').value.trim();
-  if(!name)return;
-  const d=dayOf(todayKey());
-  d.foods.push({name,cal:+document.getElementById('fCal').value||0,
-    pro:+document.getElementById('fPro').value||0,cat:document.getElementById('fCat').value});
-  save(data);closeAdd();renderHome();
-};
-/* ---------- ESCÁNER AI ---------- */
-const KEY_STORE='nutritrack_apikey';
-const getKey=()=>localStorage.getItem(KEY_STORE)||'';
-const keyModal=document.getElementById('keyModal');
-function openKeyModal(){
-  document.getElementById('apiKey').value=getKey();
-  keyModal.classList.add('open');
+function moraDe(c){ // mora pendiente de cobro
+  const d=diasAtraso(c); if(d<=0)return 0;
+  const m=S.settings.mora;
+  let base=m.tipo==='pct'?c.monto*m.valor/100:Number(m.valor)||0;
+  let tot=m.porDia?base*d:base;
+  return Math.max(0,Math.round(tot)-cMoraPagada(c));
 }
-function closeKeyModal(){keyModal.classList.remove('open');}
-document.getElementById('settingsBtn').onclick=openKeyModal;
-document.getElementById('cancelKey').onclick=closeKeyModal;
-keyModal.addEventListener('click',e=>{if(e.target===keyModal)closeKeyModal();});
-document.getElementById('saveKey').onclick=()=>{
-  const k=document.getElementById('apiKey').value.trim();
-  if(k)localStorage.setItem(KEY_STORE,k); else localStorage.removeItem(KEY_STORE);
-  closeKeyModal();
-};
-
-const scanBtn=document.getElementById('scanBtn');
-const scanInput=document.getElementById('scanInput');
-const scanBtnDefault=scanBtn.innerHTML;
-
-scanBtn.onclick=()=>{
-  if(!getKey()){
-    alert('Primero configurá tu API key de Claude tocando el engranaje ⚙ arriba a la derecha.');
-    openKeyModal();
-    return;
+function cobradorDe(c){ // cargo de cobrador pendiente
+  const d=diasAtraso(c);
+  if(d<= (S.settings.cobrador.dias||3))return 0;
+  return Math.max(0,Math.round(Number(S.settings.cobrador.monto)||0)-cCobradorPagado(c));
+}
+function estadoCuota(c){
+  if(cRestante(c)<=0)return 'pagada';
+  if(c.vence===todayStr())return Date.now()>dueAt(c.vence).getTime()?'vencida':'hoy';
+  return c.vence<todayStr()?'vencida':'futura';
+}
+function loanCuotasPend(l){return l.cuotas.filter(c=>cRestante(c)>0);}
+function loanRestante(l){return l.cuotas.reduce((a,c)=>a+cRestante(c),0);}
+function refreshLoanStatus(l){
+  if(l.status==='cancelado')return;
+  l.status=loanRestante(l)<=0?'pagado':'activo';
+}
+function genCuotas(total,n,freq,inicio,skipSun){
+  const step=FREQ_DAYS[freq]||1;
+  const cuota=Math.floor(total/n), resto=total-cuota*n;
+  const out=[]; let d=pd(inicio);
+  for(let i=0;i<n;i++){
+    if(freq==='diaria'&&skipSun){while(d.getDay()===0)d=new Date(d.getTime()+DAY);}
+    out.push({n:i+1,vence:ymd(d),monto:cuota+(i===n-1?resto:0),pagos:[]});
+    d=new Date(d.getTime()+step*DAY);
   }
-  scanInput.value='';
-  scanInput.click();
-};
-
-scanInput.onchange=async()=>{
-  const file=scanInput.files&&scanInput.files[0];
-  if(!file)return;
-  let dataUrl;
-  try{dataUrl=await readAsDataURL(file);}catch(e){alert('No se pudo leer la imagen.');return;}
-  const [meta,b64]=dataUrl.split(',');
-  const mediaType=(meta.match(/data:(.*?);/)||[])[1]||'image/jpeg';
-  scanBtn.disabled=true;
-  scanBtn.innerHTML='⏳ Analizando…';
-  try{
-    const foods=await analyzeFood(b64,mediaType);
-    if(!foods.length){alert('No se detectaron alimentos en la foto. Probá con otra o cargalos con +.');return;}
-    const d=dayOf(todayKey());
-    foods.forEach(f=>d.foods.push(f));
-    save(data);renderHome();
-    const names=foods.map(f=>`• ${f.name} (${f.cal} kcal, ${f.pro}g)`).join('\n');
-    alert('Agregado:\n\n'+names);
-  }catch(err){
-    alert('Error al analizar la foto:\n\n'+(err&&err.message?err.message:err));
-  }finally{
-    scanBtn.disabled=false;
-    scanBtn.innerHTML=scanBtnDefault;
-  }
-};
-
-function readAsDataURL(file){
-  return new Promise((res,rej)=>{
-    const r=new FileReader();
-    r.onload=()=>res(r.result);
-    r.onerror=()=>rej(r.error);
-    r.readAsDataURL(file);
-  });
+  return out;
 }
 
-const CATS=['Desayuno','Almuerzo','Merienda','Cena','Snack'];
-async function analyzeFood(b64,mediaType){
-  const prompt='Analizá esta foto de comida. Identificá cada alimento o plato visible y estimá, '+
-    'para la porción que se ve en la imagen, las calorías (kcal) y la proteína en gramos. '+
-    'Asigná una categoría según la comida del día más probable. '+
-    'Si no hay comida visible, devolvé una lista vacía.';
-  const body={
-    model:'claude-opus-4-8',
-    max_tokens:1024,
-    messages:[{role:'user',content:[
-      {type:'image',source:{type:'base64',media_type:mediaType,data:b64}},
-      {type:'text',text:prompt}
-    ]}],
-    output_config:{format:{type:'json_schema',schema:{
-      type:'object',
-      properties:{foods:{type:'array',items:{
-        type:'object',
-        properties:{
-          name:{type:'string',description:'Nombre del alimento en español'},
-          cal:{type:'integer',description:'Calorías estimadas (kcal)'},
-          pro:{type:'integer',description:'Proteína estimada en gramos'},
-          cat:{type:'string',enum:CATS}
-        },
-        required:['name','cal','pro','cat'],
-        additionalProperties:false
-      }}},
-      required:['foods'],
-      additionalProperties:false
-    }}}
-  };
-  const resp=await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{
-      'content-type':'application/json',
-      'x-api-key':getKey(),
-      'anthropic-version':'2023-06-01',
-      'anthropic-dangerous-direct-browser-access':'true'
-    },
-    body:JSON.stringify(body)
-  });
-  if(!resp.ok){
-    let msg='HTTP '+resp.status;
-    try{const e=await resp.json();if(e&&e.error&&e.error.message)msg=e.error.message;}catch(_){}
-    if(resp.status===401)msg='API key inválida. Revisala en ⚙.';
-    throw new Error(msg);
-  }
-  const out=await resp.json();
-  const txt=(out.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
-  let parsed;
-  try{parsed=JSON.parse(txt);}catch(e){throw new Error('Respuesta inesperada del modelo.');}
-  return (parsed.foods||[]).map(f=>({
-    name:String(f.name||'Alimento'),
-    cal:+f.cal||0,
-    pro:+f.pro||0,
-    cat:CATS.includes(f.cat)?f.cat:'Snack'
-  }));
+/* ================= MUTACIONES + SYNC ================= */
+function touch(o){o.updatedAt=Date.now();return o;}
+function saveClient(c){touch(c);const i=S.clients.findIndex(x=>x.id===c.id);
+  if(i<0)S.clients.push(c);else S.clients[i]=c; persist(); fbPush('client',c);}
+function saveLoan(l){refreshLoanStatus(l);touch(l);const i=S.loans.findIndex(x=>x.id===l.id);
+  if(i<0)S.loans.push(l);else S.loans[i]=l; persist(); fbPush('loan',l);}
+function saveDoc(d){touch(d);const i=S.docs.findIndex(x=>x.id===d.id);
+  if(i<0)S.docs.push(d);else S.docs[i]=d; persist(); fbPush('doc',d);}
+function delEntity(kind,obj){ // tombstone para que la baja se propague a otros dispositivos
+  touch(obj); obj.deleted=true; fbPush(kind,obj);
+  const arr=kind==='client'?S.clients:kind==='loan'?S.loans:S.docs;
+  const i=arr.findIndex(x=>x.id===obj.id); if(i>=0)arr.splice(i,1); persist();
+}
+function saveSettings(){touch(S.settings);persist();fbPushSettings();applyBiz();}
+
+/* ================= FIREBASE SYNC ================= */
+let FB={db:null,base:null,unsubs:[],status:'off'};
+function fbCfg(){try{return JSON.parse(localStorage.getItem(LS+'-fb')||'null');}catch(e){return null;}}
+function fbSetStatus(st,txt){FB.status=st;
+  const d=$('#syncdot'),t=$('#synctxt');if(!d)return;
+  d.className='syncdot'+(st==='on'?' on':st==='err'?' err':'');t.textContent=txt;}
+function loadFBScripts(){
+  if(window.firebase&&firebase.firestore)return Promise.resolve();
+  const urls=['https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js',
+              'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js'];
+  return urls.reduce((p,u)=>p.then(()=>new Promise((ok,err)=>{
+    const s=document.createElement('script');s.src=u;s.onload=ok;s.onerror=err;document.head.appendChild(s);
+  })),Promise.resolve());
+}
+function fbConnect(){
+  const cfg=fbCfg(); if(!cfg||!cfg.config||!cfg.code)return;
+  fbSetStatus('off','Conectando…');
+  loadFBScripts().then(()=>{
+    try{
+      if(!firebase.apps.length)firebase.initializeApp(cfg.config);
+      FB.db=firebase.firestore();
+      try{FB.db.enablePersistence({synchronizeTabs:true}).catch(()=>{});}catch(e){}
+      FB.base=FB.db.collection('negocios').doc(cfg.code);
+      FB.unsubs.forEach(u=>u());FB.unsubs=[];
+      // items: clientes, préstamos y documentos
+      FB.unsubs.push(FB.base.collection('items').onSnapshot(snap=>{
+        let changed=false;
+        snap.docChanges().forEach(ch=>{
+          const d=ch.doc.data(); if(!d||!d.json)return;
+          let ent; try{ent=JSON.parse(d.json);}catch(e){return;}
+          const arr=d.kind==='client'?S.clients:d.kind==='loan'?S.loans:d.kind==='doc'?S.docs:null;
+          if(!arr)return;
+          const i=arr.findIndex(x=>x.id===ent.id);
+          const localUp=i>=0?(arr[i].updatedAt||0):-1;
+          if((ent.updatedAt||0)>localUp){
+            if(ent.deleted){if(i>=0){arr.splice(i,1);changed=true;}}
+            else{if(i<0)arr.push(ent);else arr[i]=ent;changed=true;}
+          }
+        });
+        if(changed){persist();render();}
+        fbSetStatus('on','Sincronizado');
+      },err=>{console.error(err);fbSetStatus('err','Error de sincronización');}));
+      // ajustes
+      FB.unsubs.push(FB.base.collection('meta').doc('settings').onSnapshot(doc=>{
+        const d=doc.data(); if(!d||!d.json)return;
+        let st;try{st=JSON.parse(d.json);}catch(e){return;}
+        if((st.updatedAt||0)>(S.settings.updatedAt||0)){S.settings=st;persist();applyBiz();render();}
+      }));
+      // subir lo local que falte (primera conexión)
+      FB.base.collection('items').get().then(snap=>{
+        const remote={}; snap.forEach(doc=>{const d=doc.data();let e;try{e=JSON.parse(d.json);}catch(x){return;}
+          remote[doc.id]=e.updatedAt||0;});
+        [['client',S.clients],['loan',S.loans],['doc',S.docs]].forEach(([k,arr])=>{
+          arr.forEach(o=>{if((o.updatedAt||0)>(remote[o.id]||0)||!(o.id in remote))fbPush(k,o);});
+        });
+        if((S.settings.updatedAt||0)>0)fbPushSettings();
+      }).catch(()=>{});
+      fbSetStatus('on','Sincronizado');
+    }catch(e){console.error(e);fbSetStatus('err','Config inválida');}
+  }).catch(()=>fbSetStatus('err','Sin conexión a Firebase'));
+}
+function fbPush(kind,obj){
+  if(!FB.base)return;
+  FB.base.collection('items').doc(obj.id)
+    .set({kind,json:JSON.stringify(obj),updatedAt:obj.updatedAt||Date.now()})
+    .catch(e=>{console.error(e);
+      if((e&&e.code)==='invalid-argument')alert('Un documento es demasiado grande para sincronizar. Subí imágenes más livianas.');});
+}
+function fbPushSettings(){
+  if(!FB.base)return;
+  FB.base.collection('meta').doc('settings')
+    .set({json:JSON.stringify(S.settings),updatedAt:S.settings.updatedAt}).catch(()=>{});
+}
+function fbDisconnect(){FB.unsubs.forEach(u=>u());FB.unsubs=[];FB.base=null;
+  localStorage.removeItem(LS+'-fb');fbSetStatus('off','Sin sincronizar');}
+
+/* ================= RELOJ ================= */
+function tickClock(){
+  const n=new Date();
+  $('#clock').innerHTML=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')
+    +'<small>:'+String(n.getSeconds()).padStart(2,'0')+'</small>';
+  $('#cdate').textContent=n.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+}
+setInterval(tickClock,1000);tickClock();
+setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
+
+/* ================= NAVEGACIÓN ================= */
+let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='';
+$$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
+$('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
+function go(v,detail){VIEW=v;DETAIL=detail||null;render();}
+function render(){
+  $$('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v===VIEW));
+  $('#fab').style.display=(VIEW==='clientes'||VIEW==='prestamos')&&!DETAIL?'block':'none';
+  const v=$('#view');
+  if(VIEW==='inicio')v.innerHTML=vInicio();
+  else if(VIEW==='clientes')v.innerHTML=DETAIL?vCliente(DETAIL):vClientes();
+  else if(VIEW==='prestamos')v.innerHTML=DETAIL?vPrestamo(DETAIL):vPrestamos();
+  else if(VIEW==='calendario')v.innerHTML=vCalendario();
+  else if(VIEW==='ajustes')v.innerHTML=vAjustes();
+  bindView();
+}
+function applyBiz(){$('#bizname').textContent=S.settings.nombreNegocio||'PrestaControl';}
+
+/* ================= VISTA: INICIO ================= */
+function cobrosDelDia(fecha){
+  const out=[];
+  S.loans.forEach(l=>{if(l.status==='cancelado')return;
+    l.cuotas.forEach(c=>{if(c.vence===fecha)out.push({l,c});});});
+  return out;
+}
+function cobrosVencidos(){
+  const t=todayStr(),out=[];
+  S.loans.forEach(l=>{if(l.status==='cancelado')return;
+    l.cuotas.forEach(c=>{if(cRestante(c)>0&&(c.vence<t||(c.vence===t&&Date.now()>dueAt(c.vence).getTime())))out.push({l,c});});});
+  out.sort((a,b)=>a.c.vence<b.c.vence?-1:1);
+  return out;
+}
+function vInicio(){
+  const t=todayStr();
+  const activos=S.loans.filter(l=>l.status==='activo');
+  const prestado=activos.reduce((a,l)=>a+l.monto,0);
+  const porCobrar=activos.reduce((a,l)=>a+loanRestante(l),0);
+  const hoy=cobrosDelDia(t).filter(x=>cRestante(x.c)>0);
+  const hoyMonto=hoy.reduce((a,x)=>a+cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c),0);
+  const venc=cobrosVencidos();
+  const vencMonto=venc.reduce((a,x)=>a+cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c),0);
+  let cobradoHoy=0;
+  S.loans.forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
+    if(ymd(new Date(p.t))===t)cobradoHoy+=(p.monto||0)+(p.mora||0)+(p.cobrador||0);})));
+  const interes=activos.reduce((a,l)=>a+(l.total-l.monto),0);
+
+  const rowCobro=({l,c})=>{
+    const cl=client(l.clientId)||{nombre:'?'}, est=estadoCuota(c);
+    const extra=moraDe(c)+cobradorDe(c);
+    return `<div class="item" data-cobrar="${l.id}|${c.n}">
+      <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
+      <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
+        <div class="t2">Cuota ${c.n}/${l.cuotas.length} · vence ${dShort(c.vence)}${diasAtraso(c)>0?' · <span style="color:var(--red)">'+diasAtraso(c)+'d atraso</span>':''}</div></div>
+      <div class="end"><div class="m1">${fmt$(cRestante(c)+extra)}</div>
+        ${extra>0?`<div class="m2" style="color:var(--orange)">incl. ${fmt$(extra)} mora${cobradorDe(c)>0?'+cobrador':''}</div>`:`<div class="m2">${FREQ[l.frecuencia]}</div>`}</div>
+    </div>`;};
+
+  return `
+  <div class="stats">
+    <div class="stat blue"><div class="lbl">Clientes</div><div class="val">${S.clients.length}</div></div>
+    <div class="stat gold"><div class="lbl">Préstamos activos</div><div class="val">${activos.length}</div></div>
+    <div class="stat gold"><div class="lbl">Plata prestada</div><div class="val">${fmt$(prestado)}</div><div class="ex">capital activo en la calle</div></div>
+    <div class="stat blue"><div class="lbl">Por cobrar</div><div class="val">${fmt$(porCobrar)}</div><div class="ex">incluye interés</div></div>
+    <div class="stat orange"><div class="lbl">Cobros de hoy</div><div class="val">${fmt$(hoyMonto)}</div><div class="ex">${hoy.length} cuota${hoy.length===1?'':'s'}</div></div>
+    <div class="stat green"><div class="lbl">Cobrado hoy</div><div class="val">${fmt$(cobradoHoy)}</div></div>
+    <div class="stat red"><div class="lbl">Vencidos</div><div class="val">${fmt$(vencMonto)}</div><div class="ex">${venc.length} cuota${venc.length===1?'':'s'} con mora</div></div>
+    <div class="stat green"><div class="lbl">Interés en juego</div><div class="val">${fmt$(interes)}</div><div class="ex">ganancia de préstamos activos</div></div>
+  </div>
+  <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
+  <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
+  <h2>🔴 Vencidos <span class="cnt">${venc.length}</span></h2>
+  <div class="list">${venc.length?venc.slice(0,30).map(rowCobro).join(''):'<div class="empty">Nada vencido. ¡Todo al día! 🎉</div>'}</div>`;
+}
+function ini(n){return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();}
+
+/* ================= VISTA: CLIENTES ================= */
+function clienteDeuda(id){return S.loans.filter(l=>l.clientId===id&&l.status==='activo').reduce((a,l)=>a+loanRestante(l),0);}
+function vClientes(){
+  const q=cliQ.toLowerCase();
+  const cs=S.clients.filter(c=>!q||c.nombre.toLowerCase().includes(q)||(c.telefono||'').includes(q))
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  return `
+  <div class="search"><input id="cliq" placeholder="Buscar cliente…" value="${esc(cliQ)}"></div>
+  <div class="list">${cs.length?cs.map(c=>{
+    const act=S.loans.filter(l=>l.clientId===c.id&&l.status==='activo').length;
+    const deuda=clienteDeuda(c.id);
+    return `<div class="item" data-cli="${c.id}">
+      <div class="ava ${c.tipo==='comercio'?'shop':''}">${esc(ini(c.nombre))}</div>
+      <div class="mid"><div class="t1">${esc(c.nombre)} <span class="badge ${c.tipo==='comercio'?'b-com':'b-per'}">${c.tipo==='comercio'?'Comercio':'Persona'}</span></div>
+      <div class="t2">${esc(c.telefono||'sin teléfono')}${act?` · ${act} préstamo${act>1?'s':''} activo${act>1?'s':''}`:''}</div></div>
+      <div class="end">${deuda>0?`<div class="m1">${fmt$(deuda)}</div><div class="m2">debe</div>`:'<div class="m2">sin deuda</div>'}</div>
+    </div>`;}).join(''):'<div class="empty">Todavía no cargaste clientes.<br>Tocá el botón + para agregar el primero.</div>'}</div>`;
+}
+function vCliente(id){
+  const c=client(id); if(!c)return '<div class="empty">Cliente no encontrado</div>';
+  const docs=S.docs.filter(d=>d.clientId===id);
+  const loans=S.loans.filter(l=>l.clientId===id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const tel=(c.telefono||'').replace(/\D/g,'');
+  return `
+  <button class="back" data-go="clientes">← Clientes</button>
+  <div class="list"><div class="item" style="cursor:default">
+    <div class="ava ${c.tipo==='comercio'?'shop':''}" style="width:54px;height:54px;font-size:19px">${esc(ini(c.nombre))}</div>
+    <div class="mid"><div class="t1" style="font-size:18px">${esc(c.nombre)}</div>
+      <div class="t2"><span class="badge ${c.tipo==='comercio'?'b-com':'b-per'}">${c.tipo==='comercio'?'Comercio':'Persona'}</span>
+      ${c.dni?' DNI/CUIT '+esc(c.dni):''}</div>
+      <div class="t2">${esc(c.telefono||'')}${c.direccion?' · '+esc(c.direccion):''}</div>
+      ${c.notas?`<div class="t2">📝 ${esc(c.notas)}</div>`:''}</div>
+  </div></div>
+  <div class="btnrow">
+    ${tel?`<button class="btn sec" data-wa="${tel}"><span class="wamsg">🟢 WhatsApp</span></button>`:''}
+    <button class="btn sec" data-edit-cli="${id}">✏️ Editar</button>
+    <button class="btn red" data-del-cli="${id}">🗑</button>
+  </div>
+  <h2>📄 Documentación <span class="cnt">${docs.length}</span></h2>
+  <input type="file" id="docfile" accept="image/*,application/pdf" multiple style="display:none">
+  <button class="btn sec" id="adddoc">📎 Subir documento o foto</button>
+  <div class="docgrid">${docs.map(d=>`<div class="doc" data-doc="${d.id}">
+    ${d.tipo&&d.tipo.includes('pdf')?'<div class="pdf">📄</div>':`<img src="${d.data}" loading="lazy">`}
+    <div class="nm">${esc(d.nombre)}</div></div>`).join('')}</div>
+  <h2>💵 Préstamos <span class="cnt">${loans.length}</span></h2>
+  <button class="btn" data-new-loan="${id}">+ Nuevo préstamo</button>
+  <div class="list" style="margin-top:10px">${loans.length?loans.map(rowLoan).join(''):'<div class="empty">Sin préstamos</div>'}</div>`;
 }
 
-/* ---------- CALENDARIO ---------- */
-let calDate=new Date();
-const MES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-function renderCal(){
-  const y=calDate.getFullYear(),m=calDate.getMonth();
-  document.getElementById('monthName').textContent=MES[m]+' '+y;
-  const first=new Date(y,m,1);let start=first.getDay();start=start===0?6:start-1; // lunes=0
-  const days=new Date(y,m+1,0).getDate();
-  const grid=document.getElementById('calGrid');grid.innerHTML='';
-  for(let i=0;i<start;i++)grid.insertAdjacentHTML('beforeend','<div class="day empty"></div>');
-  for(let n=1;n<=days;n++){
-    const key=y+'-'+String(m+1).padStart(2,'0')+'-'+String(n).padStart(2,'0');
-    const d=data[key];
-    const hasFood=d&&d.foods&&d.foods.length>0;
-    const hasCrea=d&&d.creatine;
-    const isToday=key===todayKey();
+/* ================= VISTA: PRÉSTAMOS ================= */
+function loanTieneVencidas(l){return l.cuotas.some(c=>cRestante(c)>0&&diasAtraso(c)>0);}
+function rowLoan(l){
+  const cl=client(l.clientId)||{nombre:'?'};
+  const pagado=l.total-loanRestante(l), pct=l.total?Math.round(pagado/l.total*100):0;
+  const next=loanCuotasPend(l)[0];
+  const late=loanTieneVencidas(l);
+  const badge=l.status==='pagado'?'<span class="badge b-ok">Pagado</span>'
+    :l.status==='cancelado'?'<span class="badge b-fut">Cancelado</span>'
+    :late?'<span class="badge b-ven">Atrasado</span>':'<span class="badge b-hoy">Activo</span>';
+  return `<div class="item" data-loan="${l.id}">
+    <div class="ava ${l.tipo==='comercial'?'shop':''}">${esc(ini(cl.nombre))}</div>
+    <div class="mid"><div class="t1">${esc(cl.nombre)} ${badge}</div>
+      <div class="t2">${l.tipo==='comercial'?'Comercial':'Personal'} · ${FREQ[l.frecuencia]} · ${l.cuotas.length} cuotas
+      ${next?' · próx. '+dShort(next.vence):''}</div>
+      <div class="progress"><i style="width:${pct}%"></i></div></div>
+    <div class="end"><div class="m1">${fmt$(l.total)}</div><div class="m2">${pct}% cobrado</div></div>
+  </div>`;
+}
+function vPrestamos(){
+  let ls=[...S.loans].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  if(loanFilter==='activos')ls=ls.filter(l=>l.status==='activo');
+  else if(loanFilter==='atrasados')ls=ls.filter(l=>l.status==='activo'&&loanTieneVencidas(l));
+  else if(loanFilter==='pagados')ls=ls.filter(l=>l.status!=='activo');
+  return `
+  <div class="chips">
+    ${[['activos','Activos'],['atrasados','Atrasados'],['pagados','Finalizados'],['todos','Todos']].map(([k,t])=>
+      `<button class="${loanFilter===k?'on':''}" data-lf="${k}">${t}</button>`).join('')}
+  </div>
+  <div class="list">${ls.length?ls.map(rowLoan).join(''):'<div class="empty">No hay préstamos en esta vista.<br>Tocá + para crear uno.</div>'}</div>`;
+}
+function vPrestamo(id){
+  const l=loan(id); if(!l)return '<div class="empty">Préstamo no encontrado</div>';
+  const cl=client(l.clientId)||{nombre:'?'};
+  const restante=loanRestante(l);
+  const moraTot=l.cuotas.reduce((a,c)=>a+moraDe(c)+cobradorDe(c),0);
+  return `
+  <button class="back" data-go="prestamos">← Préstamos</button>
+  <div class="stats" style="grid-template-columns:repeat(2,1fr)">
+    <div class="stat gold"><div class="lbl">${esc(cl.nombre)}</div><div class="val" style="font-size:17px">${l.tipo==='comercial'?'Comercial':'Personal'} · ${FREQ[l.frecuencia]}</div>
+      <div class="ex">inició ${dLong(l.inicio)}</div></div>
+    <div class="stat blue"><div class="lbl">Capital + interés</div><div class="val" style="font-size:17px">${fmt$(l.monto)} + ${l.interes}%</div>
+      <div class="ex">total ${fmt$(l.total)}</div></div>
+    <div class="stat ${restante>0?'orange':'green'}"><div class="lbl">Restante</div><div class="val" style="font-size:17px">${fmt$(restante)}</div>
+      <div class="ex">${l.status==='pagado'?'¡préstamo saldado!':l.cuotas.length+' cuotas de '+fmt$(l.cuotas[0].monto)}</div></div>
+    <div class="stat ${moraTot>0?'red':'green'}"><div class="lbl">Mora acumulada</div><div class="val" style="font-size:17px">${fmt$(moraTot)}</div></div>
+  </div>
+  <h2>🗓 Cuotas</h2>
+  <div class="list">${l.cuotas.map(c=>{
+    const est=estadoCuota(c), rest=cRestante(c), mora=moraDe(c), cob=cobradorDe(c);
+    const cls=est==='pagada'?'pg':est==='vencida'?'vn':est==='hoy'?'hy':'';
+    const badge=est==='pagada'?'<span class="badge b-ok">Pagada</span>'
+      :est==='vencida'?`<span class="badge b-ven">${diasAtraso(c)}d mora</span>${cob>0?'<span class="badge b-cob">cobrador</span>':''}`
+      :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>';
+    const pagosTxt=(c.pagos||[]).map(p=>fmt$((p.monto||0)+(p.mora||0)+(p.cobrador||0))+' el '+new Date(p.t).toLocaleDateString('es-AR',{day:'numeric',month:'short'})).join(', ');
+    return `<div class="cuota ${cls}">
+      <div class="num">${c.n}</div>
+      <div class="mid" style="flex:1;min-width:0">
+        <div class="t1" style="font-size:14px">${dLong(c.vence)} ${badge}</div>
+        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${pagosTxt?'<br>💰 '+pagosTxt:''}</div>
+      </div>
+      ${rest>0?`<button class="btn green mini" data-cobrar="${l.id}|${c.n}">Cobrar</button>`:''}
+    </div>`;}).join('')}</div>
+  <div class="btnrow">
+    ${l.status==='activo'?`<button class="btn red" data-cancel-loan="${id}">Cancelar préstamo</button>`:''}
+    <button class="btn red" data-del-loan="${id}">🗑 Eliminar</button>
+  </div>`;
+}
+
+/* ================= VISTA: CALENDARIO ================= */
+function vCalendario(){
+  const y=calRef.getFullYear(),m=calRef.getMonth();
+  const first=new Date(y,m,1),start=(first.getDay()+6)%7; // lunes=0
+  const dim=new Date(y,m+1,0).getDate(),t=todayStr();
+  let cells='';
+  for(let i=0;i<start;i++)cells+='<div class="cday off"></div>';
+  for(let d=1;d<=dim;d++){
+    const f=ymd(new Date(y,m,d));
+    const cob=cobrosDelDia(f);
+    const tot=cob.reduce((a,x)=>a+x.c.monto,0);
     let dots='';
-    if(hasFood)dots+='<i class="k"></i>';
-    if(hasCrea)dots+='<i class="c"></i>';
-    grid.insertAdjacentHTML('beforeend',
-      `<div class="day${isToday?' today':''}" data-has="1" data-key="${key}">
-        <span class="n">${n}</span><span class="dots">${dots}</span></div>`);
+    if(cob.length){
+      const pend=cob.filter(x=>cRestante(x.c)>0);
+      if(!pend.length)dots='<span class="dot d-ok"></span>';
+      else if(f<t)dots='<span class="dot d-ven"></span>';
+      else if(f===t)dots='<span class="dot d-hoy"></span>';
+      else dots='<span class="dot d-pen"></span>';
+    }
+    cells+=`<div class="cday ${f===t?'today':''} ${f===calSel?'sel':''}" data-day="${f}">
+      <span>${d}</span>${cob.length?`<span class="amt">${fmt$(tot)}</span>`:''}<span class="dots">${dots}</span></div>`;
+  }
+  const sel=cobrosDelDia(calSel);
+  return `
+  <div class="calhead">
+    <button data-cal="-1">‹</button>
+    <div class="mname">${calRef.toLocaleDateString('es-AR',{month:'long',year:'numeric'})}</div>
+    <button data-cal="1">›</button>
+  </div>
+  <div class="dow">${['lu','ma','mi','ju','vi','sá','do'].map(d=>'<span>'+d+'</span>').join('')}</div>
+  <div class="cgrid">${cells}</div>
+  <h2>Cobros del ${dLong(calSel)} <span class="cnt">${sel.length}</span></h2>
+  <div class="list">${sel.length?sel.map(({l,c})=>{
+    const cl=client(l.clientId)||{nombre:'?'};const rest=cRestante(c);
+    return `<div class="item" ${rest>0?`data-cobrar="${l.id}|${c.n}"`:`data-loan="${l.id}"`}>
+      <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
+      <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
+        <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${FREQ[l.frecuencia]}</div></div>
+      <div class="end"><div class="m1">${fmt$(c.monto)}</div>
+        <div class="m2">${rest<=0?'<span style="color:var(--green)">✓ pagada</span>':estadoCuota(c)==='vencida'?'<span style="color:var(--red)">vencida</span>':'pendiente'}</div></div>
+    </div>`;}).join(''):'<div class="empty">Sin cobros este día</div>'}</div>`;
+}
+
+/* ================= VISTA: AJUSTES ================= */
+function vAjustes(){
+  const st=S.settings,fb=fbCfg();
+  return `
+  <h2>🏪 Negocio</h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <label>Nombre del negocio</label><input id="set-nombre" value="${esc(st.nombreNegocio)}">
+    <label>Símbolo de moneda</label><input id="set-moneda" value="${esc(st.moneda)}" style="max-width:120px">
+  </div>
+  <h2>⏰ Mora automática</h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <div class="hint" style="margin-top:10px">La mora se aplica sola cuando la cuota sigue impaga después de la hora límite del día de vencimiento.</div>
+    <label>Tipo de mora</label>
+    <div class="seg" id="set-moratipo">
+      <button data-v="pct" class="${st.mora.tipo==='pct'?'on':''}">% de la cuota</button>
+      <button data-v="fijo" class="${st.mora.tipo==='fijo'?'on':''}">Monto fijo</button>
+    </div>
+    <label>Valor de la mora ${st.mora.tipo==='pct'?'(%)':'('+esc(st.moneda)+')'}</label>
+    <input id="set-moraval" type="number" inputmode="decimal" value="${st.mora.valor}">
+    <label>Aplicación</label>
+    <div class="seg" id="set-morapordia">
+      <button data-v="0" class="${!st.mora.porDia?'on':''}">Una sola vez</button>
+      <button data-v="1" class="${st.mora.porDia?'on':''}">Por cada día de atraso</button>
+    </div>
+    <label>Hora límite de pago</label>
+    <select id="set-hora">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===(st.horaLimite||18)?'selected':''}>${String(h).padStart(2,'0')}:00 hs</option>`).join('')}</select>
+  </div>
+  <h2>🏍 Cargo de cobrador</h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <div class="hint" style="margin-top:10px">Cargo extra que se suma automáticamente cuando el atraso supera los días configurados. Podés ajustar el monto cuando quieras, y también editarlo al momento de cobrar.</div>
+    <label>Monto del cobrador (${esc(st.moneda)})</label>
+    <input id="set-cobmonto" type="number" inputmode="decimal" value="${st.cobrador.monto}">
+    <label>Se aplica después de (días de mora)</label>
+    <input id="set-cobdias" type="number" inputmode="numeric" value="${st.cobrador.dias}">
+  </div>
+  <button class="btn" id="set-save" style="margin-top:14px">💾 Guardar ajustes</button>
+
+  <h2>🔄 Sincronización entre dispositivos</h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <div class="hint" style="margin-top:10px">Estado: <b id="fb-estado">${FB.status==='on'?'✅ Conectado y sincronizando':fb?'⏳ Configurado (reintentando…)':'⚪ No configurado'}</b><br>
+    Con la sincronización activa, todo lo que cargues en el celular aparece al instante en la PC y al revés. Es gratis usando Google Firebase.</div>
+    <details>
+      <summary>📖 Cómo activarla (una sola vez, 5 minutos)</summary>
+      <ol>
+        <li>Entrá a <b>console.firebase.google.com</b> con tu cuenta de Google y tocá <b>Crear proyecto</b> (poné cualquier nombre y desactivá Analytics).</li>
+        <li>Dentro del proyecto: menú <b>Compilación → Firestore Database → Crear base de datos</b>. Elegí cualquier ubicación y modo <b>producción</b>.</li>
+        <li>En la pestaña <b>Reglas</b>, borrá todo, pegá esto y tocá <b>Publicar</b>:
+        <pre class="rules">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /negocios/{negocio}/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}</pre></li>
+        <li>Andá a <b>⚙️ Configuración del proyecto → Tus apps</b>, tocá el ícono <b>&lt;/&gt;</b> (Web), registrá la app (cualquier apodo) y copiá el bloque que empieza con <code>const firebaseConfig = {</code>.</li>
+        <li>Pegá ese bloque acá abajo, elegí un <b>código de negocio</b> largo y difícil de adivinar (funciona como tu contraseña: quien lo tenga ve tus datos) y tocá <b>Conectar</b>.</li>
+        <li>En tus otros dispositivos abrí esta misma app y pegá la <b>misma configuración y el mismo código</b>. ¡Listo!</li>
+      </ol>
+    </details>
+    <label>Configuración de Firebase</label>
+    <textarea id="fb-config" placeholder='Pegá acá el bloque firebaseConfig completo'>${fb?esc(JSON.stringify(fb.config,null,1)):''}</textarea>
+    <label>Código de negocio (igual en todos tus dispositivos)</label>
+    <input id="fb-code" value="${fb?esc(fb.code):''}" placeholder="ej: prestamos-lautaro-2026-x9k">
+    <div class="btnrow">
+      <button class="btn blue" id="fb-conectar">🔗 Conectar</button>
+      ${fb?'<button class="btn red" id="fb-off">Desconectar</button>':''}
+    </div>
+  </div>
+
+  <h2>🔐 Seguridad</h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <div class="hint" style="margin-top:10px">Usuario actual: <b>${esc((getAuth()||{}).user||'—')}</b>. La app pide login al abrirse y se bloquea sola si queda más de 5 minutos en segundo plano.</div>
+    <div class="btnrow">
+      <button class="btn sec" id="sec-change">Cambiar usuario / contraseña</button>
+      <button class="btn sec" id="sec-lock">🔒 Cerrar sesión</button>
+    </div>
+  </div>
+
+  <h2>💾 Copia de seguridad</h2>
+  <div class="btnrow">
+    <button class="btn sec" id="bk-export">⬇️ Exportar datos</button>
+    <button class="btn sec" id="bk-import">⬆️ Importar</button>
+    <input type="file" id="bk-file" accept="application/json" style="display:none">
+  </div>
+  <h2>⚠️ Zona de peligro</h2>
+  <button class="btn red" id="wipe">Borrar todos los datos de este dispositivo</button>
+  <div class="hint" style="text-align:center;margin-top:18px">PrestaControl · hecho a medida ✨</div>`;
+}
+
+/* ================= FORMULARIOS / MODALES ================= */
+function modal(html){$('#modal').innerHTML=`<div class="ovl" id="ovl"><div class="sheet">
+  <button class="x" id="mx">✕</button>${html}</div></div>`;
+  $('#mx').onclick=closeModal;
+  $('#ovl').onclick=e=>{if(e.target.id==='ovl')closeModal();};}
+function closeModal(){$('#modal').innerHTML='';}
+
+function formCliente(id){
+  const c=id?client(id):{tipo:'persona'};
+  modal(`<h3>${id?'Editar':'Nuevo'} cliente</h3>
+  <label>Tipo</label>
+  <div class="seg" id="f-tipo">
+    <button data-v="persona" class="${c.tipo!=='comercio'?'on':''}">👤 Persona</button>
+    <button data-v="comercio" class="${c.tipo==='comercio'?'on':''}">🏪 Comercio</button>
+  </div>
+  <label>Nombre completo / Razón social *</label><input id="f-nombre" value="${esc(c.nombre||'')}">
+  <label>Teléfono (con código de país para WhatsApp)</label><input id="f-tel" inputmode="tel" placeholder="549351..." value="${esc(c.telefono||'')}">
+  <div class="frow"><div><label>DNI / CUIT</label><input id="f-dni" value="${esc(c.dni||'')}"></div></div>
+  <label>Dirección</label><input id="f-dir" value="${esc(c.direccion||'')}">
+  <label>Notas</label><textarea id="f-notas">${esc(c.notas||'')}</textarea>
+  <button class="btn" id="f-save" style="margin-top:18px">Guardar cliente</button>`);
+  let tipo=c.tipo||'persona';
+  $$('#f-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
+    $$('#f-tipo button').forEach(x=>x.classList.toggle('on',x===b));});
+  $('#f-save').onclick=()=>{
+    const nombre=$('#f-nombre').value.trim();
+    if(!nombre)return alert('Poné el nombre del cliente');
+    const obj=id?{...c}:{id:uid(),createdAt:Date.now()};
+    Object.assign(obj,{nombre,tipo,telefono:$('#f-tel').value.trim(),dni:$('#f-dni').value.trim(),
+      direccion:$('#f-dir').value.trim(),notas:$('#f-notas').value.trim()});
+    saveClient(obj);closeModal();go('clientes',obj.id);
+  };
+}
+
+function formPrestamo(clientId){
+  if(!S.clients.length){alert('Primero cargá un cliente.');go('clientes');return;}
+  const hoy=todayStr();
+  modal(`<h3>Nuevo préstamo</h3>
+  <label>Cliente *</label>
+  <select id="p-cli">${S.clients.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(c=>
+    `<option value="${c.id}" ${c.id===clientId?'selected':''}>${esc(c.nombre)} (${c.tipo==='comercio'?'comercio':'persona'})</option>`).join('')}</select>
+  <label>Tipo de préstamo</label>
+  <div class="seg" id="p-tipo">
+    <button data-v="personal" class="on">👤 Personal</button>
+    <button data-v="comercial">🏪 Comercial</button>
+  </div>
+  <div class="frow">
+    <div><label>Monto prestado *</label><input id="p-monto" type="number" inputmode="decimal" placeholder="100000"></div>
+    <div><label>Interés % *</label><input id="p-int" type="number" inputmode="decimal" placeholder="30"></div>
+  </div>
+  <div class="frow">
+    <div><label>Frecuencia</label><select id="p-freq">
+      <option value="diaria">Diaria</option><option value="semanal">Semanal</option><option value="quincenal">Quincenal</option></select></div>
+    <div><label>Cant. de cuotas *</label><input id="p-n" type="number" inputmode="numeric" placeholder="30"></div>
+  </div>
+  <div class="frow">
+    <div><label>Primer cobro</label><input id="p-inicio" type="date" value="${hoy}"></div>
+    <div id="p-sundiv"><label>Domingos</label><div class="seg" id="p-sun">
+      <button data-v="1" class="on">Saltar</button><button data-v="0">Cobrar</button></div></div>
+  </div>
+  <div class="resume" id="p-resume">Completá monto, interés y cuotas para ver el resumen.</div>
+  <button class="btn" id="p-save" style="margin-top:16px">💵 Crear préstamo</button>`);
+  let tipo='personal',skipSun=true;
+  $$('#p-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
+    $$('#p-tipo button').forEach(x=>x.classList.toggle('on',x===b));});
+  $$('#p-sun button').forEach(b=>b.onclick=()=>{skipSun=b.dataset.v==='1';
+    $$('#p-sun button').forEach(x=>x.classList.toggle('on',x===b));});
+  const upd=()=>{
+    const m=+$('#p-monto').value||0,i=+$('#p-int').value||0,n=+$('#p-n').value||0,f=$('#p-freq').value;
+    $('#p-sundiv').style.display=f==='diaria'?'':'none';
+    if(!m||!n){$('#p-resume').textContent='Completá monto, interés y cuotas para ver el resumen.';return;}
+    const total=Math.round(m*(1+i/100));
+    const cs=genCuotas(total,n,f,$('#p-inicio').value||hoy,f==='diaria'&&skipSun);
+    $('#p-resume').innerHTML=`Total a devolver: <b>${fmt$(total)}</b> (ganancia ${fmt$(total-m)})<br>
+      ${n} cuotas ${FREQ[f].toLowerCase()}s de <b>${fmt$(cs[0].monto)}</b><br>
+      Última cuota: ${dLong(cs[cs.length-1].vence)}`;
+  };
+  ['p-monto','p-int','p-n','p-freq','p-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
+  $('#p-sun').addEventListener('click',()=>setTimeout(upd,0));
+  $$('#p-tipo button').forEach(b=>b.addEventListener('click',upd));
+  $('#p-save').onclick=()=>{
+    const m=+$('#p-monto').value,i=+$('#p-int').value||0,n=+$('#p-n').value,f=$('#p-freq').value,ini=$('#p-inicio').value;
+    if(!m||m<=0)return alert('Poné el monto prestado');
+    if(!n||n<1)return alert('Poné la cantidad de cuotas');
+    if(!ini)return alert('Elegí la fecha del primer cobro');
+    const total=Math.round(m*(1+i/100));
+    const l={id:uid(),clientId:$('#p-cli').value,tipo,monto:m,interes:i,total,
+      frecuencia:f,inicio:ini,cuotas:genCuotas(total,n,f,ini,f==='diaria'&&skipSun),
+      status:'activo',createdAt:Date.now()};
+    saveLoan(l);closeModal();go('prestamos',l.id);
+  };
+}
+
+function formCobro(loanId,nCuota){
+  const l=loan(loanId);if(!l)return;
+  const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
+  const cl=client(l.clientId)||{nombre:'?'};
+  const rest=cRestante(c),mora=moraDe(c),cob=cobradorDe(c),atr=diasAtraso(c);
+  modal(`<h3>Cobrar cuota ${c.n}/${l.cuotas.length}</h3>
+  <div class="hint">${esc(cl.nombre)} · vencía el ${dLong(c.vence)}${atr>0?` · <span style="color:var(--red)">${atr} día${atr>1?'s':''} de mora</span>`:''}</div>
+  <label>Pago a la cuota (restan ${fmt$(rest)})</label>
+  <input id="co-base" type="number" inputmode="decimal" value="${rest}">
+  <label>Mora ${atr>0?'(automática)':''}</label>
+  <input id="co-mora" type="number" inputmode="decimal" value="${mora}">
+  ${mora>0?'<button class="btn sec mini" id="co-condonar" style="margin-top:8px">🤝 Condonar mora</button>':''}
+  <label>Cargo de cobrador ${cob>0?'(automático: +'+(S.settings.cobrador.dias||3)+' días de mora)':''}</label>
+  <input id="co-cob" type="number" inputmode="decimal" value="${cob}">
+  <div class="resume">Total a cobrar: <b id="co-total">${fmt$(rest+mora+cob)}</b></div>
+  <button class="btn green" id="co-save" style="margin-top:16px">✅ Registrar cobro</button>`);
+  const upd=()=>{$('#co-total').textContent=fmt$((+$('#co-base').value||0)+(+$('#co-mora').value||0)+(+$('#co-cob').value||0));};
+  ['co-base','co-mora','co-cob'].forEach(x=>$('#'+x).oninput=upd);
+  const cond=$('#co-condonar');if(cond)cond.onclick=()=>{$('#co-mora').value=0;upd();};
+  $('#co-save').onclick=()=>{
+    const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
+    if(base+m+cb<=0)return alert('El monto debe ser mayor a 0');
+    if(base>rest&&!confirm('Estás cobrando más que lo que resta de la cuota. ¿Continuar?'))return;
+    c.pagos=c.pagos||[];c.pagos.push({t:Date.now(),monto:base,mora:m,cobrador:cb});
+    saveLoan(l);closeModal();render();
+    const tel=(cl.telefono||'').replace(/\D/g,'');
+    if(tel&&confirm('Cobro registrado ✅\n¿Enviar comprobante por WhatsApp?')){
+      const msg=`Hola ${cl.nombre}! Te confirmamos el pago de ${fmt$(base+m+cb)} (cuota ${c.n}/${l.cuotas.length}). `+
+        (cRestante(c)>0?`Queda pendiente ${fmt$(cRestante(c))} de esta cuota. `:'')+
+        `Saldo restante del préstamo: ${fmt$(loanRestante(l))}. ¡Gracias! — ${S.settings.nombreNegocio}`;
+      window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
+    }
+  };
+}
+
+function verDoc(id){
+  const d=S.docs.find(x=>x.id===id);if(!d)return;
+  modal(`<h3>${esc(d.nombre)}</h3>
+  ${d.tipo&&d.tipo.includes('pdf')?`<embed src="${d.data}" type="application/pdf" style="width:100%;height:60vh;border-radius:12px;margin-top:10px">
+    <div class="hint">Si no se ve, tocá Abrir.</div>`:`<img src="${d.data}" style="width:100%;border-radius:12px;margin-top:10px">`}
+  <div class="btnrow">
+    <button class="btn sec" id="d-open">↗️ Abrir</button>
+    <button class="btn red" id="d-del">🗑 Eliminar</button>
+  </div>`);
+  $('#d-open').onclick=()=>{
+    const w=window.open('','_blank');
+    if(w)w.document.write(d.tipo&&d.tipo.includes('pdf')?`<embed src="${d.data}" style="width:100%;height:100%">`:`<img src="${d.data}" style="max-width:100%">`);
+  };
+  $('#d-del').onclick=()=>{if(confirm('¿Eliminar este documento?')){delEntity('doc',d);closeModal();render();}};
+}
+
+/* ================= DOCUMENTOS: subida + compresión ================= */
+function compressImage(file){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=1100;let w=img.width,h=img.height;
+      if(w>MAX||h>MAX){const r=Math.min(MAX/w,MAX/h);w=Math.round(w*r);h=Math.round(h*r);}
+      const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+      cv.getContext('2d').drawImage(img,0,0,w,h);
+      let q=0.72,data=cv.toDataURL('image/jpeg',q);
+      while(data.length>880000&&q>0.3){q-=0.12;data=cv.toDataURL('image/jpeg',q);}
+      res(data);
+    };
+    img.onerror=()=>res(null);
+    img.src=URL.createObjectURL(file);
+  });
+}
+async function subirDocs(clientId,files){
+  for(const f of files){
+    let data=null,tipo=f.type;
+    if(f.type.startsWith('image/')){data=await compressImage(f);tipo='image/jpeg';}
+    else if(f.type==='application/pdf'){
+      if(f.size>880000){alert(f.name+': el PDF supera 850 KB y no se puede sincronizar. Sacale una foto en su lugar.');continue;}
+      data=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.readAsDataURL(f);});
+    }else{alert(f.name+': formato no soportado (solo imágenes o PDF).');continue;}
+    if(!data){alert('No se pudo procesar '+f.name);continue;}
+    saveDoc({id:uid(),clientId,nombre:f.name,tipo,data,createdAt:Date.now()});
+  }
+  render();
+}
+
+/* ================= SEGURIDAD / LOGIN ================= */
+const AUTH_KEY=LS+'-auth';
+let UNLOCKED=false;
+function getAuth(){try{return JSON.parse(localStorage.getItem(AUTH_KEY)||'null');}catch(e){return null;}}
+async function hashPass(pass,salt){
+  if(window.crypto&&crypto.subtle){
+    try{
+      const enc=new TextEncoder();
+      const key=await crypto.subtle.importKey('raw',enc.encode(pass),'PBKDF2',false,['deriveBits']);
+      const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode(salt),iterations:120000,hash:'SHA-256'},key,256);
+      return [...new Uint8Array(bits)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    }catch(e){}
+  }
+  // fallback para contextos sin crypto.subtle (ej. abrir el archivo sin https)
+  let h=2166136261;const s=salt+'|'+pass;let out='';
+  for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}
+  for(let r=0;r<8;r++){h=Math.imul(h^(h>>>13),0x5bd1e995);out+=(h>>>0).toString(16).padStart(8,'0');}
+  return out;
+}
+async function setAuth(user,pass){
+  const salt=uid()+uid();
+  localStorage.setItem(AUTH_KEY,JSON.stringify({user,salt,hash:await hashPass(pass,salt)}));
+}
+async function checkAuth(user,pass){
+  const a=getAuth();if(!a)return false;
+  return a.user.toLowerCase()===user.toLowerCase()&&a.hash===await hashPass(pass,a.salt);
+}
+function unlockApp(){
+  UNLOCKED=true;sessionStorage.setItem('pc-unlocked','1');
+  $('#lock').classList.remove('show');$('#lock').innerHTML='';
+  applyBiz();render();fbConnect();
+}
+function showLock(){
+  UNLOCKED=false;sessionStorage.removeItem('pc-unlocked');
+  const a=getAuth(),lk=$('#lock');
+  lk.classList.add('show');
+  if(!a){
+    lk.innerHTML=`<div class="lockbox">
+      <div class="logo"><div class="ic">💰</div><h1>PrestaControl</h1><div class="sub">Creá tu acceso privado</div></div>
+      <label>Elegí un usuario</label><input id="lk-user" autocomplete="username">
+      <label>Elegí una contraseña</label><input id="lk-pass" type="password" autocomplete="new-password">
+      <label>Repetí la contraseña</label><input id="lk-pass2" type="password" autocomplete="new-password">
+      <div class="hint">⚠️ Guardala bien: si la olvidás, la única salida es borrar los datos de este dispositivo (lo sincronizado en la nube se recupera reconectando).</div>
+      <button class="btn" id="lk-create" style="margin-top:16px">Crear cuenta</button>
+      <div class="lockerr" id="lk-err"></div>
+    </div>`;
+    $('#lk-create').onclick=async()=>{
+      const u=$('#lk-user').value.trim(),p=$('#lk-pass').value,p2=$('#lk-pass2').value;
+      if(!u)return $('#lk-err').textContent='Elegí un usuario';
+      if(p.length<4)return $('#lk-err').textContent='La contraseña debe tener al menos 4 caracteres';
+      if(p!==p2)return $('#lk-err').textContent='Las contraseñas no coinciden';
+      await setAuth(u,p);unlockApp();
+    };
+  }else{
+    lk.innerHTML=`<div class="lockbox">
+      <div class="logo"><div class="ic">🔒</div><h1>PrestaControl</h1><div class="sub">Acceso privado</div></div>
+      <label>Usuario</label><input id="lk-user" autocomplete="username">
+      <label>Contraseña</label><input id="lk-pass" type="password" autocomplete="current-password">
+      <button class="btn" id="lk-go" style="margin-top:16px">🔓 Ingresar</button>
+      <div class="lockerr" id="lk-err"></div>
+      <div class="lockfoot"><button id="lk-forgot">¿Olvidaste tu contraseña?</button></div>
+    </div>`;
+    const go=async()=>{
+      if(await checkAuth($('#lk-user').value.trim(),$('#lk-pass').value))unlockApp();
+      else{$('#lk-err').textContent='Usuario o contraseña incorrectos';$('#lk-pass').value='';}
+    };
+    $('#lk-go').onclick=go;
+    $('#lk-pass').onkeydown=e=>{if(e.key==='Enter')go();};
+    $('#lk-user').focus();
+    $('#lk-forgot').onclick=()=>{
+      const r=prompt('Sin la contraseña no se puede entrar. La única opción es BORRAR los datos de este dispositivo y empezar de nuevo (si tenés sincronización activa, recuperás todo reconectándola).\n\nEscribí BORRAR para confirmar:');
+      if(r==='BORRAR'){localStorage.removeItem(LS);localStorage.removeItem(AUTH_KEY);localStorage.removeItem(LS+'-fb');location.reload();}
+    };
   }
 }
-document.getElementById('prevM').onclick=()=>{calDate.setMonth(calDate.getMonth()-1);renderCal();};
-document.getElementById('nextM').onclick=()=>{calDate.setMonth(calDate.getMonth()+1);renderCal();};
-document.getElementById('calGrid').addEventListener('click',e=>{
-  const el=e.target.closest('.day');if(!el||el.dataset.has!=='1')return;
-  openDay(el.dataset.key);
-});
-
-/* ---------- DETALLE DE DÍA ---------- */
-const dayModal=document.getElementById('dayModal');
-function openDay(key){
-  const d=data[key]||{foods:[],creatine:false};const [y,m,dd]=key.split('-');
-  document.getElementById('dayTitle').textContent=dd+' de '+MES[+m-1];
-  const tc=d.foods.reduce((a,f)=>a+ +f.cal,0);
-  const tp=d.foods.reduce((a,f)=>a+ +f.pro,0);
-  const hasSteps=d.steps!==undefined&&d.steps!==null&&d.steps!=='';
-  const cardCss='padding:12px 14px;flex:1;min-width:88px';
-  document.getElementById('daySummary').innerHTML=
-    `<div class="card" style="${cardCss}"><div class="lbl">Calorías</div><div style="font-size:22px;font-weight:800;color:var(--lime);margin-top:6px">${tc}</div></div>
-     <div class="card" style="${cardCss}"><div class="lbl">Proteína</div><div style="font-size:22px;font-weight:800;color:var(--blue);margin-top:6px">${tp}g</div></div>
-     <div class="card" style="${cardCss}"><div class="lbl">Creatina</div><div style="font-size:22px;font-weight:800;margin-top:6px;color:${d.creatine?'var(--lime)':'var(--muted)'}">${d.creatine?'✓':'—'}</div></div>
-     <div class="card" style="${cardCss}"><div class="lbl">Entreno</div><div style="font-size:22px;font-weight:800;margin-top:6px;color:${d.trained?'var(--lime)':'var(--muted)'}">${d.trained?'✓':'—'}</div></div>
-     <div class="card" style="${cardCss}"><div class="lbl">Actividad</div><div style="font-size:22px;font-weight:800;margin-top:6px;color:${d.activity?'var(--lime)':'var(--muted)'}">${d.activity?'✓':'—'}</div></div>
-     <div class="card" style="${cardCss}"><div class="lbl">Pasos</div><div style="font-size:${hasSteps?'22px':'13px'};font-weight:${hasSteps?'800':'500'};margin-top:6px;color:${hasSteps?'var(--txt)':'var(--muted)'}">${hasSteps?d.steps:'No se registró'}</div></div>`;
-  const rows=document.getElementById('dayRows');
-  rows.innerHTML=d.foods.length?d.foods.map(f=>`<div class="row">
-    <div class="food">${esc(f.name)}</div><div class="cal">${f.cal}</div><div class="pro">${f.pro}g</div></div>`).join('')
-    :'<div class="empty">Sin comidas registradas.</div>';
-  dayModal.classList.add('open');
+function formCambiarClave(){
+  modal(`<h3>Cambiar usuario o contraseña</h3>
+  <label>Contraseña actual</label><input id="ch-old" type="password">
+  <label>Nuevo usuario</label><input id="ch-user" value="${esc((getAuth()||{}).user||'')}">
+  <label>Nueva contraseña</label><input id="ch-pass" type="password">
+  <label>Repetí la nueva contraseña</label><input id="ch-pass2" type="password">
+  <button class="btn" id="ch-save" style="margin-top:16px">Guardar</button>`);
+  $('#ch-save').onclick=async()=>{
+    const a=getAuth();
+    if(!(await checkAuth(a.user,$('#ch-old').value)))return alert('La contraseña actual es incorrecta');
+    const u=$('#ch-user').value.trim(),p=$('#ch-pass').value;
+    if(!u)return alert('Poné un usuario');
+    if(p.length<4)return alert('La nueva contraseña debe tener al menos 4 caracteres');
+    if(p!==$('#ch-pass2').value)return alert('Las contraseñas nuevas no coinciden');
+    await setAuth(u,p);closeModal();alert('Acceso actualizado ✅');
+  };
 }
-document.getElementById('closeDay').onclick=()=>dayModal.classList.remove('open');
-dayModal.addEventListener('click',e=>{if(e.target===dayModal)dayModal.classList.remove('open');});
-
-/* ---------- TABS ---------- */
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active');
-  const t=b.dataset.tab;
-  document.getElementById('view-home').classList.toggle('hidden',t!=='home');
-  document.getElementById('view-cal').classList.toggle('hidden',t!=='cal');
-  document.getElementById('fabBar').classList.toggle('hidden',t!=='home');
-  document.getElementById('subtitle').textContent=t==='home'?'Panel de rendimiento diario':'Historial de consumo';
-  if(t==='cal')renderCal();
+// re-bloquear si la app queda en segundo plano más de 5 minutos
+let hiddenAt=0;
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)hiddenAt=Date.now();
+  else if(UNLOCKED&&hiddenAt&&Date.now()-hiddenAt>5*60000)showLock();
 });
 
-renderHome();
-if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{});}
+/* ================= BACKUP ================= */
+function exportar(){
+  const blob=new Blob([JSON.stringify(S,null,1)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='prestacontrol-backup-'+todayStr()+'.json';a.click();
+}
+function importar(file){
+  const fr=new FileReader();
+  fr.onload=()=>{try{
+    const p=JSON.parse(fr.result);
+    if(!p.clients||!p.loans)throw 0;
+    if(!confirm(`El archivo tiene ${p.clients.length} clientes y ${p.loans.length} préstamos. ¿Importar? (se combina con lo actual)`))return;
+    [['client',p.clients],['loan',p.loans],['doc',p.docs||[]]].forEach(([k,arr])=>arr.forEach(o=>{
+      const tgt=k==='client'?S.clients:k==='loan'?S.loans:S.docs;
+      const i=tgt.findIndex(x=>x.id===o.id);
+      if(i<0)tgt.push(o);else if((o.updatedAt||0)>(tgt[i].updatedAt||0))tgt[i]=o;
+      fbPush(k,o);
+    }));
+    persist();render();alert('Importado ✅');
+  }catch(e){alert('Archivo inválido');}};
+  fr.readAsText(file);
+}
+
+/* ================= BINDINGS ================= */
+function bindView(){
+  $$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+  $$('[data-cli]').forEach(b=>b.onclick=()=>go('clientes',b.dataset.cli));
+  $$('[data-loan]').forEach(b=>b.onclick=()=>go('prestamos',b.dataset.loan));
+  $$('[data-cobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
+    const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
+  $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
+  $$('[data-cal]').forEach(b=>b.onclick=()=>{calRef=new Date(calRef.getFullYear(),calRef.getMonth()+ +b.dataset.cal,1);render();});
+  $$('[data-day]').forEach(b=>b.onclick=()=>{calSel=b.dataset.day;render();});
+  $$('[data-edit-cli]').forEach(b=>b.onclick=()=>formCliente(b.dataset.editCli));
+  $$('[data-new-loan]').forEach(b=>b.onclick=()=>formPrestamo(b.dataset.newLoan));
+  $$('[data-wa]').forEach(b=>b.onclick=()=>{
+    const cid=DETAIL,deuda=clienteDeuda(cid),cl=client(cid);
+    const pend=cobrosVencidos().filter(x=>x.l.clientId===cid);
+    let msg=`Hola ${cl.nombre}! Te escribimos de ${S.settings.nombreNegocio}. `;
+    msg+=pend.length?`Tenés ${pend.length} cuota${pend.length>1?'s':''} vencida${pend.length>1?'s':''} por un total de ${fmt$(pend.reduce((a,x)=>a+cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c),0))} (incluye mora). ¿Coordinamos el pago?`
+      :deuda>0?`Te recordamos tu saldo pendiente de ${fmt$(deuda)}. ¡Gracias!`:`¡Gracias por estar al día! 🙌`;
+    window.open('https://wa.me/'+b.dataset.wa+'?text='+encodeURIComponent(msg),'_blank');});
+  $$('[data-del-cli]').forEach(b=>b.onclick=()=>{
+    const c=client(b.dataset.delCli);if(!c)return;
+    const nl=S.loans.filter(l=>l.clientId===c.id).length;
+    if(!confirm(`¿Eliminar a ${c.nombre}?${nl?` Se borrarán también sus ${nl} préstamo(s) y documentos.`:''}`))return;
+    S.loans.filter(l=>l.clientId===c.id).forEach(l=>delEntity('loan',l));
+    S.docs.filter(d=>d.clientId===c.id).forEach(d=>delEntity('doc',d));
+    delEntity('client',c);go('clientes');});
+  $$('[data-del-loan]').forEach(b=>b.onclick=()=>{
+    const l=loan(b.dataset.delLoan);if(!l)return;
+    if(!confirm('¿Eliminar este préstamo y todo su historial de pagos?'))return;
+    delEntity('loan',l);go('prestamos');});
+  $$('[data-cancel-loan]').forEach(b=>b.onclick=()=>{
+    const l=loan(b.dataset.cancelLoan);if(!l)return;
+    if(!confirm('¿Marcar el préstamo como cancelado? Dejará de aparecer en cobros y vencidos.'))return;
+    l.status='cancelado';touch(l);persist();fbPush('loan',l);render();});
+  $$('[data-doc]').forEach(b=>b.onclick=()=>verDoc(b.dataset.doc));
+
+  const cq=$('#cliq');if(cq){cq.oninput=()=>{cliQ=cq.value;
+    const list=cq.closest('#view');render();const nq=$('#cliq');nq.focus();nq.setSelectionRange(nq.value.length,nq.value.length);};}
+  const ad=$('#adddoc');if(ad){ad.onclick=()=>$('#docfile').click();
+    $('#docfile').onchange=e=>{if(e.target.files.length)subirDocs(DETAIL,[...e.target.files]);};}
+
+  // ajustes
+  const sv=$('#set-save');
+  if(sv){
+    let moratipo=S.settings.mora.tipo,porDia=S.settings.mora.porDia;
+    $$('#set-moratipo button').forEach(b=>b.onclick=()=>{moratipo=b.dataset.v;
+      $$('#set-moratipo button').forEach(x=>x.classList.toggle('on',x===b));});
+    $$('#set-morapordia button').forEach(b=>b.onclick=()=>{porDia=b.dataset.v==='1';
+      $$('#set-morapordia button').forEach(x=>x.classList.toggle('on',x===b));});
+    sv.onclick=()=>{
+      S.settings.nombreNegocio=$('#set-nombre').value.trim()||'Mi Negocio';
+      S.settings.moneda=$('#set-moneda').value.trim()||'$';
+      S.settings.mora={tipo:moratipo,valor:+$('#set-moraval').value||0,porDia};
+      S.settings.horaLimite=+$('#set-hora').value;
+      S.settings.cobrador={monto:+$('#set-cobmonto').value||0,dias:+$('#set-cobdias').value||3};
+      saveSettings();render();alert('Ajustes guardados ✅');};
+    $('#fb-conectar').onclick=()=>{
+      const raw=$('#fb-config').value.trim(),code=$('#fb-code').value.trim();
+      if(!raw||!code)return alert('Pegá la configuración de Firebase y elegí un código de negocio.');
+      let cfg;
+      try{
+        const m=raw.match(/\{[\s\S]*\}/);if(!m)throw 0;
+        cfg=(new Function('return ('+m[0]+')'))();
+        if(!cfg.projectId||!cfg.apiKey)throw 0;
+      }catch(e){return alert('La configuración no es válida. Pegá el bloque firebaseConfig completo, con las llaves { }.');}
+      localStorage.setItem(LS+'-fb',JSON.stringify({config:cfg,code}));
+      fbConnect();alert('Conectando… El estado se actualiza arriba a la derecha.');render();};
+    const off=$('#fb-off');if(off)off.onclick=()=>{if(confirm('¿Desconectar la sincronización en este dispositivo? Los datos locales no se borran.')){fbDisconnect();render();}};
+    $('#sec-change').onclick=formCambiarClave;
+    $('#sec-lock').onclick=showLock;
+    $('#bk-export').onclick=exportar;
+    $('#bk-import').onclick=()=>$('#bk-file').click();
+    $('#bk-file').onchange=e=>{if(e.target.files[0])importar(e.target.files[0]);};
+    $('#wipe').onclick=()=>{
+      if(!confirm('⚠️ Se borrarán TODOS los datos guardados en este dispositivo. ¿Continuar?'))return;
+      if(!confirm('¿Seguro? Esta acción no se puede deshacer (si tenés sincronización, los datos siguen en la nube).'))return;
+      localStorage.removeItem(LS);location.reload();};
+  }
+}
+
+/* ================= INIT ================= */
+applyBiz();
+if(getAuth()&&sessionStorage.getItem('pc-unlocked')==='1')unlockApp();
+else showLock();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 </script>
 </body>
 </html>
