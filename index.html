@@ -261,7 +261,7 @@ function dLong(s){const d=pd(s);return d.toLocaleDateString('es-AR',{weekday:'sh
 const client=id=>S.clients.find(c=>c.id===id);
 const loan=id=>S.loans.find(l=>l.id===id);
 const FREQ={diaria:'Diaria',semanal:'Semanal',quincenal:'Quincenal'};
-const FREQ_DAYS={diaria:1,semanal:7,quincenal:15};
+const FREQ_DAYS={diaria:1,semanal:7,quincenal:14};
 
 /* ================= LÓGICA DE CUOTAS / MORA ================= */
 function cPagadoBase(c){return (c.pagos||[]).reduce((a,p)=>a+(p.monto||0),0);}
@@ -770,9 +770,12 @@ function formCliente(id){
   };
 }
 
+function fechaPrimerCobro(freq){ // el primer cobro cae un período después de entregar la plata
+  return ymd(new Date(pd(todayStr()).getTime()+FREQ_DAYS[freq]*DAY));
+}
 function formPrestamo(clientId){
   if(!S.clients.length){alert('Primero cargá un cliente.');go('clientes');return;}
-  const hoy=todayStr();
+  const hoy=todayStr(),inicioDef=fechaPrimerCobro('diaria');
   modal(`<h3>Nuevo préstamo</h3>
   <label>Cliente *</label>
   <select id="p-cli">${S.clients.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(c=>
@@ -792,7 +795,7 @@ function formPrestamo(clientId){
     <div><label>Cant. de cuotas *</label><input id="p-n" type="number" inputmode="numeric" placeholder="30"></div>
   </div>
   <div class="frow">
-    <div><label>Primer cobro</label><input id="p-inicio" type="date" value="${hoy}"></div>
+    <div><label>Primer cobro</label><input id="p-inicio" type="date" value="${inicioDef}"></div>
     <div id="p-sundiv"><label>Domingos</label><div class="seg" id="p-sun">
       <button data-v="1" class="on">Saltar</button><button data-v="0">Cobrar</button></div></div>
   </div>
@@ -810,10 +813,15 @@ function formPrestamo(clientId){
     const total=Math.round(m*(1+i/100));
     const cs=genCuotas(total,n,f,$('#p-inicio').value||hoy,f==='diaria'&&skipSun);
     $('#p-resume').innerHTML=`Total a devolver: <b>${fmt$(total)}</b> (ganancia ${fmt$(total-m)})<br>
-      ${n} cuotas ${FREQ[f].toLowerCase()}s de <b>${fmt$(cs[0].monto)}</b><br>
+      ${n} cuotas ${{diaria:'diarias',semanal:'semanales',quincenal:'quincenales'}[f]} de <b>${fmt$(cs[0].monto)}</b><br>
       Última cuota: ${dLong(cs[cs.length-1].vence)}`;
   };
   ['p-monto','p-int','p-n','p-freq','p-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
+  // la fecha del primer cobro sigue a la frecuencia, salvo que el usuario la haya tocado a mano
+  let fechaManual=false;
+  $('#p-inicio').addEventListener('input',()=>fechaManual=true);
+  $('#p-freq').addEventListener('change',()=>{
+    if(!fechaManual){$('#p-inicio').value=fechaPrimerCobro($('#p-freq').value);upd();}});
   $('#p-sun').addEventListener('click',()=>setTimeout(upd,0));
   $$('#p-tipo button').forEach(b=>b.addEventListener('click',upd));
   $('#p-save').onclick=()=>{

@@ -6,7 +6,7 @@ Aplicación privada para administrar un negocio de préstamos personales y comer
 
 - 🔐 **Acceso privado** con usuario y contraseña (se bloquea sola al quedar en segundo plano).
 - 👥 **Clientes** (personas o comercios) con teléfono, DNI/CUIT, dirección, notas y **documentación adjunta** (fotos de DNI, recibos, PDFs — se comprimen solas).
-- 💵 **Préstamos personales o comerciales** con interés manual (%), frecuencia **diaria, semanal o quincenal**, cantidad de cuotas libre y opción de saltar domingos.
+- 💵 **Préstamos personales o comerciales** con interés manual (%), frecuencia **diaria, semanal o quincenal (cada 14 días, mismo día de la semana)**, cantidad de cuotas libre y opción de saltar domingos. El primer cobro cae un período después de entregar el dinero.
 - ⏰ **Mora automática**: pasada la hora límite (por defecto 18:00) del día de vencimiento, la cuota suma mora sola. Configurable: % de la cuota o monto fijo, una vez o por día de atraso.
 - 🏍 **Cargo de cobrador automático** cuando el atraso supera los días configurados (por defecto 3). El monto lo manejás vos desde Ajustes y también al momento de cobrar.
 - 📅 **Calendario de cobros** con colores por estado (pagado / hoy / pendiente / vencido) y total del día.
