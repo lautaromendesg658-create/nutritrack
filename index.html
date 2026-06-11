@@ -610,9 +610,9 @@ function generarContrato(id){
   const cl=client(l.clientId)||{};
   const m=S.settings.mora||{tipo:'pct',valor:5,porDia:false};
   const cob=S.settings.cobrador||{dias:3,monto:15000};
-  const moraTxt=m.tipo==='pct'
-    ? m.valor+'% del valor de la cuota'+(m.porDia?' por día de atraso':'')
-    : fmt$(Number(m.valor)||0)+(m.porDia?' por día de atraso':'');
+  const moraTxt=(m.tipo==='pct'
+    ? fmt$(Math.round(l.cuotas[0].monto*(Number(m.valor)||0)/100))
+    : fmt$(Number(m.valor)||0))+(m.porDia?' por cada día de atraso':'');
   const ult=l.cuotas[l.cuotas.length-1];
   const hoy=new Date();
   const fHoy=hoy.toLocaleDateString('es-AR',{day:'numeric',month:'long',year:'numeric'});
@@ -665,6 +665,7 @@ function generarContrato(id){
     <table>
       <tr><td class="k">Nombre del Cliente:</td><td>${esc((cl.nombre||'—').toUpperCase())}</td></tr>
       <tr><td class="k">DNI / CUIT:</td><td>${esc(cl.dni||'—')}</td></tr>
+      <tr><td class="k">Domicilio:</td><td>${esc(cl.direccion||'—')}</td></tr>
       <tr><td class="k">Monto del Préstamo:</td><td>${fmt$(l.monto)}</td></tr>
       <tr><td class="k">Total a Devolver:</td><td>${fmt$(l.total)}</td></tr>
       <tr><td class="k">Fecha de Inicio:</td><td>${dLong(l.inicio)}</td></tr>
@@ -673,13 +674,13 @@ function generarContrato(id){
       <tr><td class="k">Valor de la Cuota:</td><td>${fmt$(l.cuotas[0].monto)}</td></tr>
       <tr><td class="k">Modalidad:</td><td>${FREQ[l.frecuencia]}</td></tr>
       <tr><td class="k">Mora por Cuota:</td><td>${moraTxt}</td></tr>
-      <tr><td class="k">Cobrador (monto fijo):</td><td>${fmt$(Number(cob.monto)||0)}</td></tr>
     </table>
     <h3>CLÁUSULAS</h3>
     <ul>
       <li>El Prestatario se compromete a pagar el préstamo en las cuotas y plazos según el cronograma establecido.</li>
       <li>Cada cuota incluye una parte del capital e intereses acordados entre las partes.</li>
       <li>En caso de atraso en el pago, se aplicarán los intereses moratorios estipulados en este contrato.</li>
+      <li>De no abonarse las cuotas en tiempo y forma, transcurridos ${cob.dias} día${cob.dias==1?'':'s'} de atraso, El Prestamista queda facultado para disponer la visita de un cobrador al domicilio declarado por El Prestatario —el estipulado en su DNI y/o el consignado en el presente contrato—, a fin de gestionar el cobro de la deuda de manera presencial, pudiendo asimismo proceder a la fijación de avisos o carteles de deuda. Los gastos de dicha gestión de cobranza correrán por cuenta exclusiva del Prestatario y se sumarán al saldo adeudado.</li>
       <li>El Prestamista podrá tomar las acciones legales correspondientes en caso de incumplimiento reiterado.</li>
       <li>Este contrato tiene validez legal y podrá ser presentado como soporte en las instancias que correspondan.</li>
     </ul>
