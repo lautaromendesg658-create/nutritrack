@@ -622,10 +622,12 @@ function generarContrato(id){
   *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',Arial,sans-serif}
   body{background:#fff;color:#1f2937}
   .hoja{max-width:760px;margin:0 auto;background:#fff}
-  .head{background:#0d2e47;padding:34px 40px 26px;border-bottom:6px solid #1f9d7a}
+  .head{background:#0d2e47;padding:34px 40px 26px;border-bottom:6px solid #1f9d7a;
+    display:flex;justify-content:space-between;align-items:flex-start}
   .head h1{color:#fff;font-size:30px;font-weight:800;letter-spacing:.5px}
   .head .s1{color:#1f9d7a;font-weight:700;font-size:13px;letter-spacing:1px;margin-top:3px}
   .head .s2{color:#cbd5e1;font-style:italic;font-size:11px;margin-top:3px}
+  .head .pesos{color:#3d5a75;font-size:40px;font-weight:800;letter-spacing:10px;margin-top:6px}
   .cuerpo{padding:34px 40px}
   h2{text-align:center;color:#13476b;font-size:21px;letter-spacing:.5px}
   .sub{width:90px;height:3px;background:#1f9d7a;margin:8px auto 22px;border-radius:2px}
@@ -649,9 +651,12 @@ function generarContrato(id){
 </style></head><body>
 <div class="hoja">
   <div class="head">
-    <h1>PRESTAMOS PPP</h1>
-    <div class="s1">COMERCIALES Y PERSONALES</div>
-    <div class="s2">Agilidad y Confianza · Zona Sur</div>
+    <div>
+      <h1>PRESTAMOS PPP</h1>
+      <div class="s1">COMERCIALES Y PERSONALES</div>
+      <div class="s2">Agilidad y Confianza · Zona Sur</div>
+    </div>
+    <div class="pesos">$ $ $</div>
   </div>
   <div class="cuerpo">
     <h2>CONTRATO DE PRÉSTAMO</h2><div class="sub"></div>
@@ -660,18 +665,15 @@ function generarContrato(id){
     <table>
       <tr><td class="k">Nombre del Cliente:</td><td>${esc((cl.nombre||'—').toUpperCase())}</td></tr>
       <tr><td class="k">DNI / CUIT:</td><td>${esc(cl.dni||'—')}</td></tr>
-      <tr><td class="k">Teléfono:</td><td>${esc(cl.telefono||'—')}</td></tr>
-      <tr><td class="k">Dirección:</td><td>${esc(cl.direccion||'—')}</td></tr>
       <tr><td class="k">Monto del Préstamo:</td><td>${fmt$(l.monto)}</td></tr>
-      <tr><td class="k">Interés:</td><td>${l.interes}%</td></tr>
       <tr><td class="k">Total a Devolver:</td><td>${fmt$(l.total)}</td></tr>
       <tr><td class="k">Fecha de Inicio:</td><td>${dLong(l.inicio)}</td></tr>
       <tr><td class="k">Fecha de Finalización:</td><td>${dLong(ult.vence)}</td></tr>
       <tr><td class="k">Número de Cuotas:</td><td>${l.cuotas.length}</td></tr>
       <tr><td class="k">Valor de la Cuota:</td><td>${fmt$(l.cuotas[0].monto)}</td></tr>
       <tr><td class="k">Modalidad:</td><td>${FREQ[l.frecuencia]}</td></tr>
-      <tr><td class="k">Mora por Atraso:</td><td>${moraTxt}</td></tr>
-      <tr><td class="k">Cargo por Cobrador:</td><td>${fmt$(Number(cob.monto)||0)} (luego de ${cob.dias} días de atraso)</td></tr>
+      <tr><td class="k">Mora por Cuota:</td><td>${moraTxt}</td></tr>
+      <tr><td class="k">Cobrador (monto fijo):</td><td>${fmt$(Number(cob.monto)||0)}</td></tr>
     </table>
     <h3>CLÁUSULAS</h3>
     <ul>
@@ -683,7 +685,7 @@ function generarContrato(id){
     </ul>
     <p class="cierre">Ambas partes declaran haber leído y comprendido el presente contrato, aceptando voluntariamente todas sus condiciones. Firmado en Zona Sur, Buenos Aires, el día ${fHoy}.</p>
     <div class="firmas">
-      <div class="firma"><div class="linea">El Prestatario</div><div class="quien">${esc((cl.nombre||'').toUpperCase())}</div></div>
+      <div class="firma"><div class="linea">El Prestatario</div><div class="quien">${esc((cl.nombre||'').toUpperCase())}${cl.dni?' · DNI '+esc(cl.dni):''}</div></div>
       <div class="firma"><div class="linea">El Prestamista</div><div class="quien">PRESTAMOS PPP</div></div>
     </div>
   </div>
