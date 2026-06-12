@@ -196,6 +196,14 @@
   .lockerr{color:var(--red);font-size:13px;font-weight:700;text-align:center;margin-top:12px;min-height:18px}
   .lockfoot{text-align:center;margin-top:22px}
   .lockfoot button{background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline}
+
+  /* visor de contrato integrado (window.open no anda en la app instalada) */
+  .cview{position:fixed;inset:0;z-index:120;background:#272b33;display:flex;flex-direction:column}
+  .cview .cbar{display:flex;gap:10px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:#0d2e47}
+  .cview .cbar button{flex:1;border:none;border-radius:11px;padding:12px;font-weight:800;font-size:14px}
+  .cview .cclose{background:rgba(255,255,255,.14);color:#fff}
+  .cview .cprint{background:#1f9d7a;color:#fff}
+  .cview iframe{flex:1;width:100%;border:none;background:#fff}
 </style>
 </head>
 <body>
@@ -648,6 +656,15 @@ function generarContrato(id){
   .printbar{position:fixed;bottom:18px;left:0;right:0;display:flex;justify-content:center;z-index:9}
   .printbar button{background:#1f9d7a;color:#fff;border:none;border-radius:99px;padding:15px 34px;font-size:16px;font-weight:800;box-shadow:0 6px 24px rgba(0,0,0,.35)}
   @media print{.printbar{display:none}}
+  /* vista en pantallas angostas (la impresión/PDF conserva el diseño completo) */
+  @media screen and (max-width:600px){
+    .head{flex-direction:column;gap:6px;padding:24px 20px 20px}
+    .head h1{font-size:24px}
+    .head .pesos{font-size:22px;letter-spacing:6px;margin-top:0}
+    .cuerpo{padding:24px 18px}
+    .firmas{flex-direction:column;gap:34px}
+    .firma{width:80%}
+  }
 </style></head><body>
 <div class="hoja">
   <div class="head">
@@ -694,10 +711,18 @@ function generarContrato(id){
 </div>
 <div class="printbar"><button onclick="window.print()">🖨 Imprimir / Guardar PDF</button></div>
 </body></html>`;
-  const w=window.open('','_blank');
-  if(!w){alert('Permití las ventanas emergentes para ver el contrato');return;}
-  w.document.write(html);
-  w.document.close();
+  const ov=document.createElement('div');ov.className='cview';
+  ov.innerHTML=`<div class="cbar">
+    <button class="cclose">✕ Cerrar</button>
+    <button class="cprint">🖨 Imprimir / Guardar PDF</button>
+  </div><iframe></iframe>`;
+  document.body.appendChild(ov);
+  const f=ov.querySelector('iframe');f.srcdoc=html;
+  ov.querySelector('.cclose').onclick=()=>ov.remove();
+  ov.querySelector('.cprint').onclick=()=>{
+    try{f.contentWindow.focus();f.contentWindow.print();}
+    catch(e){alert('Usá el botón verde al pie del contrato para imprimir o guardar el PDF.');}
+  };
 }
 
 /* ================= VISTA: CALENDARIO ================= */
