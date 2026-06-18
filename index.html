@@ -934,9 +934,10 @@ function formPrestamo(clientId){
     if(!m||!n){$('#p-resume').textContent='Completá monto, interés y cuotas para ver el resumen.';return;}
     const total=Math.round(m*(1+i/100));
     const cs=genCuotas(total,n,f,$('#p-inicio').value||hoy,f==='diaria'&&skipSun);
-    $('#p-resume').innerHTML=`Total a devolver: <b>${fmt$(total)}</b> (ganancia ${fmt$(total-m)})<br>
+    $('#p-resume').innerHTML=`Total a devolver: <b>${fmt$(total)}</b><br>
       ${n} cuotas ${{diaria:'diarias',semanal:'semanales',quincenal:'quincenales'}[f]} de <b>${fmt$(cs[0].monto)}</b><br>
-      Última cuota: ${dLong(cs[cs.length-1].vence)}`;
+      Última cuota: ${dLong(cs[cs.length-1].vence)}<br>
+      Ganancia: <b>${fmt$(total-m)}</b>`;
   };
   ['p-monto','p-int','p-n','p-freq','p-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
   // la fecha del primer cobro sigue a la frecuencia, salvo que el usuario la haya tocado a mano
