@@ -665,7 +665,10 @@ function vPrestamo(id){
         <div class="t1" style="font-size:14px">${dLong(c.vence)} ${badge}</div>
         <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${pagosTxt?'<br>💰 '+pagosTxt:''}</div>
       </div>
-      ${rest>0?`<button class="btn green mini" data-cobrar="${l.id}|${c.n}">Cobrar</button>`:''}
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+        <button class="btn sec mini" data-fecha="${l.id}|${c.n}" title="Cambiar fecha">📅</button>
+        ${rest>0?`<button class="btn green mini" data-cobrar="${l.id}|${c.n}">Cobrar</button>`:''}
+      </div>
     </div>`;}).join('')}</div>
   <div class="btnrow">
     ${l.status==='activo'?`<button class="btn red" data-cancel-loan="${id}">Cancelar préstamo</button>`:''}
@@ -1000,6 +1003,7 @@ function formPrestamo(clientId){
     <div id="p-sundiv"><label>Domingos</label><div class="seg" id="p-sun">
       <button data-v="1" class="on">Saltar</button><button data-v="0">Cobrar</button></div></div>
   </div>
+  <div class="hint">La fecha del primer cobro se sugiere sola, pero podés cambiarla a mano. Después, dentro del préstamo, también podés editar la fecha de cualquier cuota con el botón 📅.</div>
   <label>Reparto de ganancia</label>
   <div class="seg" id="p-reparto">
     <button data-v="0" class="on">Toda para mí</button>
@@ -1089,6 +1093,41 @@ function formPrestamo(clientId){
       l.gestorId=sid; l.gestorPct=sp; l.gestorNombre=socioNombre(sid);
     }
     saveLoan(l);closeModal();go('prestamos',l.id);
+  };
+}
+
+function formFecha(loanId,nCuota){
+  const l=loan(loanId);if(!l)return;
+  const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
+  const sigue=l.cuotas.filter(x=>x.n>c.n).length;
+  modal(`<h3>Cambiar fecha · cuota ${c.n}/${l.cuotas.length}</h3>
+  <div class="hint">Vencimiento actual: ${dLong(c.vence)}. Elegí la nueva fecha de pago para esta cuota.</div>
+  <label>Nueva fecha de vencimiento</label>
+  <input id="fe-fecha" type="date" value="${c.vence}">
+  ${sigue?`<label>¿Qué hago con las ${sigue} cuota(s) siguientes?</label>
+  <div class="seg" id="fe-modo">
+    <button data-v="una" class="on">Solo esta</button>
+    <button data-v="cascada">Correr todas igual</button>
+  </div>
+  <div class="hint" id="fe-hint">Solo se mueve esta cuota; las demás quedan en su fecha.</div>`:''}
+  <button class="btn" id="fe-save" style="margin-top:16px">Guardar fecha</button>`);
+  let modo='una';
+  if(sigue){
+    $$('#fe-modo button').forEach(b=>b.onclick=()=>{modo=b.dataset.v;
+      $$('#fe-modo button').forEach(x=>x.classList.toggle('on',x===b));
+      $('#fe-hint').textContent=modo==='una'?'Solo se mueve esta cuota; las demás quedan en su fecha.'
+        :'Esta cuota y todas las siguientes se corren la misma cantidad de días.';});
+  }
+  $('#fe-save').onclick=()=>{
+    const nueva=$('#fe-fecha').value;
+    if(!nueva)return alert('Elegí una fecha');
+    if(modo==='cascada'&&sigue){
+      const delta=Math.round((pd(nueva).getTime()-pd(c.vence).getTime())/DAY);
+      l.cuotas.forEach(x=>{if(x.n>=c.n)x.vence=ymd(new Date(pd(x.vence).getTime()+delta*DAY));});
+    }else{
+      c.vence=nueva;
+    }
+    saveLoan(l);closeModal();render();
   };
 }
 
@@ -1303,6 +1342,8 @@ function bindView(){
   $$('[data-loan]').forEach(b=>b.onclick=()=>go('prestamos',b.dataset.loan));
   $$('[data-cobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
+  $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
+    const[id,n]=b.dataset.fecha.split('|');formFecha(id,+n);});
   $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
   $$('[data-cal]').forEach(b=>b.onclick=()=>{calRef=new Date(calRef.getFullYear(),calRef.getMonth()+ +b.dataset.cal,1);render();});
   $$('[data-day]').forEach(b=>b.onclick=()=>{calSel=b.dataset.day;render();});
