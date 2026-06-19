@@ -304,17 +304,23 @@ function estadoCuota(c){
 function loanCuotasPend(l){return l.cuotas.filter(c=>cRestante(c)>0);}
 function loanRestante(l){return l.cuotas.reduce((a,c)=>a+cRestante(c),0);}
 function loanGanancia(l){return Math.max(0,(l.total||0)-(l.monto||0));}
-function loanGananciaRealizada(l){ // ganancia ya cobrada, proporcional a lo cobrado del total
-  if(!l.total)return 0;
+function loanExtrasCobrados(l){ // mora + cobrador efectivamente cobrados (también se reparten)
+  return l.cuotas.reduce((a,c)=>a+cMoraPagada(c)+cCobradorPagado(c),0);
+}
+function loanGananciaProyectada(l){ // interés + extras ya cobrados
+  return loanGanancia(l)+loanExtrasCobrados(l);
+}
+function loanGananciaRealizada(l){ // interés cobrado (proporcional) + mora y cobrador cobrados
+  if(!l.total)return loanExtrasCobrados(l);
   const cobrado=l.total-loanRestante(l);
-  return Math.round(loanGanancia(l)*cobrado/l.total);
+  return Math.round(loanGanancia(l)*cobrado/l.total)+loanExtrasCobrados(l);
 }
 function socioNombre(id){
   const s=(S.settings.socios||[]).find(x=>x.id===id);
   return s?s.nombre:null;
 }
 function loanReparto(l){ // devuelve {socioNom, socioPct, miPct, gananciaTotal, miParte, socioParte, realizada{...}}
-  const g=loanGanancia(l), gr=loanGananciaRealizada(l);
+  const g=loanGananciaProyectada(l), gr=loanGananciaRealizada(l);
   if(!l.gestorId||!l.gestorPct){return {compartido:false, gananciaTotal:g, miParteTotal:g, miParteReal:gr};}
   const sp=Math.max(0,Math.min(100,l.gestorPct)), mp=100-sp;
   const nom=socioNombre(l.gestorId)||l.gestorNombre||'Socio';
@@ -635,7 +641,7 @@ function vPrestamo(id){
     if(!r.compartido)return '';
     return `<h2>🤝 Reparto de ganancia</h2>
     <div class="list" style="padding:14px">
-      <div class="t2" style="margin-bottom:10px">Ganancia total del préstamo: <b style="color:var(--gold)">${fmt$(r.gananciaTotal)}</b></div>
+      <div class="t2" style="margin-bottom:10px">Ganancia del préstamo: <b style="color:var(--gold)">${fmt$(r.gananciaTotal)}</b><br><span style="font-size:11px">interés + mora y cobrador cobrados</span></div>
       <div class="cuota" style="padding:10px 0"><div class="num">YO</div>
         <div class="mid"><div class="t1" style="font-size:14px">Mi parte (${r.miPct}%)</div>
         <div class="t2">cobrado hasta ahora: ${fmt$(r.miParteReal)}</div></div>
