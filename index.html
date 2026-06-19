@@ -242,13 +242,15 @@ const DEF_SETTINGS={
   nombreNegocio:'Mi Negocio', moneda:'$',
   mora:{tipo:'pct', valor:10, porDia:false}, horaLimite:18,
   cobrador:{monto:0, dias:3},
+  socios:[],
   updatedAt:0
 };
 let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[]};
 try{const raw=localStorage.getItem(LS); if(raw){const p=JSON.parse(raw);
   S={settings:{...DEF_SETTINGS,...p.settings,
      mora:{...DEF_SETTINGS.mora,...(p.settings&&p.settings.mora||{})},
-     cobrador:{...DEF_SETTINGS.cobrador,...(p.settings&&p.settings.cobrador||{})}},
+     cobrador:{...DEF_SETTINGS.cobrador,...(p.settings&&p.settings.cobrador||{})},
+     socios:(p.settings&&p.settings.socios)||[]},
     clients:p.clients||[], loans:p.loans||[], docs:p.docs||[]};}}catch(e){}
 
 function persist(){try{localStorage.setItem(LS,JSON.stringify(S));}catch(e){
@@ -301,6 +303,25 @@ function estadoCuota(c){
 }
 function loanCuotasPend(l){return l.cuotas.filter(c=>cRestante(c)>0);}
 function loanRestante(l){return l.cuotas.reduce((a,c)=>a+cRestante(c),0);}
+function loanGanancia(l){return Math.max(0,(l.total||0)-(l.monto||0));}
+function loanGananciaRealizada(l){ // ganancia ya cobrada, proporcional a lo cobrado del total
+  if(!l.total)return 0;
+  const cobrado=l.total-loanRestante(l);
+  return Math.round(loanGanancia(l)*cobrado/l.total);
+}
+function socioNombre(id){
+  const s=(S.settings.socios||[]).find(x=>x.id===id);
+  return s?s.nombre:null;
+}
+function loanReparto(l){ // devuelve {socioNom, socioPct, miPct, gananciaTotal, miParte, socioParte, realizada{...}}
+  const g=loanGanancia(l), gr=loanGananciaRealizada(l);
+  if(!l.gestorId||!l.gestorPct){return {compartido:false, gananciaTotal:g, miParteTotal:g, miParteReal:gr};}
+  const sp=Math.max(0,Math.min(100,l.gestorPct)), mp=100-sp;
+  const nom=socioNombre(l.gestorId)||l.gestorNombre||'Socio';
+  return {compartido:true, socioNom:nom, socioPct:sp, miPct:mp, gananciaTotal:g,
+    socioParteTotal:Math.round(g*sp/100), miParteTotal:Math.round(g*mp/100),
+    socioParteReal:Math.round(gr*sp/100), miParteReal:Math.round(gr*mp/100)};
+}
 function refreshLoanStatus(l){
   if(l.status==='cancelado')return;
   l.status=loanRestante(l)<=0?'pagado':'activo';
@@ -464,6 +485,26 @@ function vInicio(){
     if(ymd(new Date(p.t))===t)cobradoHoy+=(p.monto||0)+(p.mora||0)+(p.cobrador||0);})));
   const interes=activos.reduce((a,l)=>a+(l.total-l.monto),0);
 
+  // reparto de ganancias por socio (sobre préstamos activos)
+  let miTotal=0,miReal=0; const porSocio={};
+  activos.forEach(l=>{const r=loanReparto(l);
+    miTotal+=r.miParteTotal||0; miReal+=r.miParteReal||0;
+    if(r.compartido){const k=r.socioNom;
+      if(!porSocio[k])porSocio[k]={total:0,real:0};
+      porSocio[k].total+=r.socioParteTotal; porSocio[k].real+=r.socioParteReal;}});
+  const haySocios=Object.keys(porSocio).length>0;
+  const repartoHTML=haySocios?`
+  <h2>🤝 Reparto de ganancias <span class="cnt">activos</span></h2>
+  <div class="list">
+    <div class="item" style="cursor:default"><div class="ava">YO</div>
+      <div class="mid"><div class="t1">Mi parte</div><div class="t2">cobrado: ${fmt$(miReal)}</div></div>
+      <div class="end"><div class="m1" style="color:var(--green)">${fmt$(miTotal)}</div><div class="m2">proyectado</div></div></div>
+    ${Object.entries(porSocio).map(([nom,v])=>`<div class="item" style="cursor:default">
+      <div class="ava shop">${esc(ini(nom))}</div>
+      <div class="mid"><div class="t1">${esc(nom)}</div><div class="t2">cobrado: ${fmt$(v.real)}</div></div>
+      <div class="end"><div class="m1" style="color:var(--blue)">${fmt$(v.total)}</div><div class="m2">proyectado</div></div></div>`).join('')}
+  </div>`:'';
+
   const rowCobro=({l,c})=>{
     const cl=client(l.clientId)||{nombre:'?'}, est=estadoCuota(c);
     const extra=moraDe(c)+cobradorDe(c);
@@ -486,6 +527,7 @@ function vInicio(){
     <div class="stat red"><div class="lbl">Vencidos</div><div class="val">${fmt$(vencMonto)}</div><div class="ex">${venc.length} cuota${venc.length===1?'':'s'} con mora</div></div>
     <div class="stat green"><div class="lbl">Interés en juego</div><div class="val">${fmt$(interes)}</div><div class="ex">ganancia de préstamos activos</div></div>
   </div>
+  ${repartoHTML}
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
   <h2>🔴 Vencidos <span class="cnt">${venc.length}</span></h2>
@@ -589,6 +631,20 @@ function vPrestamo(id){
       <div class="ex">${l.status==='pagado'?'¡préstamo saldado!':l.cuotas.length+' cuotas de '+fmt$(l.cuotas[0].monto)}</div></div>
     <div class="stat ${moraTot>0?'red':'green'}"><div class="lbl">Mora acumulada</div><div class="val" style="font-size:17px">${fmt$(moraTot)}</div></div>
   </div>
+  ${(()=>{const r=loanReparto(l);
+    if(!r.compartido)return '';
+    return `<h2>🤝 Reparto de ganancia</h2>
+    <div class="list" style="padding:14px">
+      <div class="t2" style="margin-bottom:10px">Ganancia total del préstamo: <b style="color:var(--gold)">${fmt$(r.gananciaTotal)}</b></div>
+      <div class="cuota" style="padding:10px 0"><div class="num">YO</div>
+        <div class="mid"><div class="t1" style="font-size:14px">Mi parte (${r.miPct}%)</div>
+        <div class="t2">cobrado hasta ahora: ${fmt$(r.miParteReal)}</div></div>
+        <div class="end"><div class="m1" style="color:var(--green)">${fmt$(r.miParteTotal)}</div></div></div>
+      <div class="cuota" style="padding:10px 0;border-bottom:none"><div class="num">${esc(ini(r.socioNom))}</div>
+        <div class="mid"><div class="t1" style="font-size:14px">${esc(r.socioNom)} (${r.socioPct}%)</div>
+        <div class="t2">cobrado hasta ahora: ${fmt$(r.socioParteReal)}</div></div>
+        <div class="end"><div class="m1" style="color:var(--blue)">${fmt$(r.socioParteTotal)}</div></div></div>
+    </div>`;})()}
   <h2>🗓 Cuotas</h2>
   <div class="list">${l.cuotas.map(c=>{
     const est=estadoCuota(c), rest=cRestante(c), mora=moraDe(c), cob=cobradorDe(c);
@@ -805,6 +861,23 @@ function vAjustes(){
   </div>
   <button class="btn" id="set-save" style="margin-top:14px">💾 Guardar ajustes</button>
 
+  <h2>🤝 Socios / Gestores <span class="cnt">${(st.socios||[]).length}</span></h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <div class="hint" style="margin-top:10px">Agregá a las personas que gestionan clientes y se reparten la ganancia con vos. Después, al crear un préstamo, elegís el socio y qué porcentaje le toca. Tu parte se calcula sola.</div>
+    <div id="socios-list" style="margin-top:6px">
+      ${(st.socios||[]).length?(st.socios||[]).map(s=>`<div class="item" style="cursor:default;padding-left:0;padding-right:0">
+        <div class="ava">${esc(ini(s.nombre))}</div>
+        <div class="mid"><div class="t1">${esc(s.nombre)}</div>
+          <div class="t2">${S.loans.filter(l=>l.gestorId===s.id).length} préstamo(s) asignado(s)</div></div>
+        <button class="btn red mini" data-del-socio="${s.id}">🗑</button>
+      </div>`).join(''):'<div class="empty" style="padding:18px">Todavía no agregaste socios</div>'}
+    </div>
+    <div class="frow" style="margin-top:10px">
+      <div style="flex:2"><input id="socio-nombre" placeholder="Nombre del socio"></div>
+      <button class="btn mini" id="socio-add" style="white-space:nowrap">+ Agregar</button>
+    </div>
+  </div>
+
   <h2>🔄 Sincronización entre dispositivos</h2>
   <div class="list" style="padding:4px 14px 16px">
     <div class="hint" style="margin-top:10px">Estado: <b id="fb-estado">${FB.status==='on'?'✅ Conectado y sincronizando':fb?'⏳ Configurado (reintentando…)':'⚪ No configurado'}</b><br>
@@ -921,9 +994,22 @@ function formPrestamo(clientId){
     <div id="p-sundiv"><label>Domingos</label><div class="seg" id="p-sun">
       <button data-v="1" class="on">Saltar</button><button data-v="0">Cobrar</button></div></div>
   </div>
+  <label>Reparto de ganancia</label>
+  <div class="seg" id="p-reparto">
+    <button data-v="0" class="on">Toda para mí</button>
+    <button data-v="1">Compartir con socio</button>
+  </div>
+  <div id="p-sociobox" style="display:none">
+    <div class="frow" style="margin-top:10px">
+      <div><label>Socio gestor</label>
+        <select id="p-socio">${(S.settings.socios||[]).map(s=>`<option value="${s.id}">${esc(s.nombre)}</option>`).join('')}
+          <option value="__nuevo__">➕ Agregar socio nuevo…</option></select></div>
+      <div><label>% para el socio</label><input id="p-sociopct" type="number" inputmode="decimal" value="50" min="0" max="100"></div>
+    </div>
+  </div>
   <div class="resume" id="p-resume">Completá monto, interés y cuotas para ver el resumen.</div>
   <button class="btn" id="p-save" style="margin-top:16px">💵 Crear préstamo</button>`);
-  let tipo='personal',skipSun=true;
+  let tipo='personal',skipSun=true,compartir=false;
   $$('#p-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
     $$('#p-tipo button').forEach(x=>x.classList.toggle('on',x===b));});
   $$('#p-sun button').forEach(b=>b.onclick=()=>{skipSun=b.dataset.v==='1';
@@ -934,10 +1020,20 @@ function formPrestamo(clientId){
     if(!m||!n){$('#p-resume').textContent='Completá monto, interés y cuotas para ver el resumen.';return;}
     const total=Math.round(m*(1+i/100));
     const cs=genCuotas(total,n,f,$('#p-inicio').value||hoy,f==='diaria'&&skipSun);
+    const ganancia=total-m;
+    let repartoTxt='';
+    if(compartir){
+      const sel=$('#p-socio'), nom=sel&&sel.value!=='__nuevo__'&&sel.selectedOptions.length?sel.selectedOptions[0].textContent:'Socio';
+      const sp=Math.max(0,Math.min(100,+$('#p-sociopct').value||0)), mp=100-sp;
+      repartoTxt=`<br>Ganancia: <b>${fmt$(ganancia)}</b>`
+        +`<br>· Tu parte (${mp}%): <b>${fmt$(Math.round(ganancia*mp/100))}</b>`
+        +`<br>· ${esc(nom)} (${sp}%): <b>${fmt$(Math.round(ganancia*sp/100))}</b>`;
+    }else{
+      repartoTxt=`<br>Ganancia: <b>${fmt$(ganancia)}</b>`;
+    }
     $('#p-resume').innerHTML=`Total a devolver: <b>${fmt$(total)}</b><br>
       ${n} cuotas ${{diaria:'diarias',semanal:'semanales',quincenal:'quincenales'}[f]} de <b>${fmt$(cs[0].monto)}</b><br>
-      Última cuota: ${dLong(cs[cs.length-1].vence)}<br>
-      Ganancia: <b>${fmt$(total-m)}</b>`;
+      Última cuota: ${dLong(cs[cs.length-1].vence)}${repartoTxt}`;
   };
   ['p-monto','p-int','p-n','p-freq','p-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
   // la fecha del primer cobro sigue a la frecuencia, salvo que el usuario la haya tocado a mano
@@ -947,6 +1043,30 @@ function formPrestamo(clientId){
     if(!fechaManual){$('#p-inicio').value=fechaPrimerCobro($('#p-freq').value);upd();}});
   $('#p-sun').addEventListener('click',()=>setTimeout(upd,0));
   $$('#p-tipo button').forEach(b=>b.addEventListener('click',upd));
+  $$('#p-reparto button').forEach(b=>b.onclick=()=>{
+    compartir=b.dataset.v==='1';
+    $$('#p-reparto button').forEach(x=>x.classList.toggle('on',x===b));
+    if(compartir&&!(S.settings.socios||[]).length){
+      const nom=prompt('¿Nombre del socio que gestiona este cliente?');
+      if(nom&&nom.trim()){
+        const s={id:uid(),nombre:nom.trim()};S.settings.socios.push(s);saveSettings();
+        $('#p-socio').insertAdjacentHTML('afterbegin',`<option value="${s.id}" selected>${esc(s.nombre)}</option>`);
+      }else{compartir=false;$$('#p-reparto button').forEach(x=>x.classList.toggle('on',x.dataset.v==='0'));}
+    }
+    $('#p-sociobox').style.display=compartir?'':'none';upd();
+  });
+  $('#p-socio').addEventListener('change',e=>{
+    if(e.target.value==='__nuevo__'){
+      const nom=prompt('Nombre del nuevo socio:');
+      if(nom&&nom.trim()){
+        const s={id:uid(),nombre:nom.trim()};S.settings.socios.push(s);saveSettings();
+        e.target.insertAdjacentHTML('afterbegin',`<option value="${s.id}">${esc(s.nombre)}</option>`);
+        e.target.value=s.id;
+      }else{e.target.selectedIndex=0;}
+    }
+    upd();
+  });
+  $('#p-sociopct').addEventListener('input',upd);
   $('#p-save').onclick=()=>{
     const m=+$('#p-monto').value,i=+$('#p-int').value||0,n=+$('#p-n').value,f=$('#p-freq').value,ini=$('#p-inicio').value;
     if(!m||m<=0)return alert('Poné el monto prestado');
@@ -956,6 +1076,12 @@ function formPrestamo(clientId){
     const l={id:uid(),clientId:$('#p-cli').value,tipo,monto:m,interes:i,total,
       frecuencia:f,inicio:ini,cuotas:genCuotas(total,n,f,ini,f==='diaria'&&skipSun),
       status:'activo',createdAt:Date.now()};
+    if(compartir){
+      const sid=$('#p-socio').value;
+      if(!sid||sid==='__nuevo__')return alert('Elegí o agregá el socio que gestiona el préstamo');
+      const sp=Math.max(0,Math.min(100,+$('#p-sociopct').value||0));
+      l.gestorId=sid; l.gestorPct=sp; l.gestorNombre=socioNombre(sid);
+    }
     saveLoan(l);closeModal();go('prestamos',l.id);
   };
 }
@@ -1221,6 +1347,17 @@ function bindView(){
       S.settings.horaLimite=+$('#set-hora').value;
       S.settings.cobrador={monto:+$('#set-cobmonto').value||0,dias:+$('#set-cobdias').value||3};
       saveSettings();render();alert('Ajustes guardados ✅');};
+    const sa=$('#socio-add');if(sa){sa.onclick=()=>{
+      const nom=$('#socio-nombre').value.trim();
+      if(!nom)return alert('Escribí el nombre del socio');
+      S.settings.socios=S.settings.socios||[];
+      S.settings.socios.push({id:uid(),nombre:nom});
+      saveSettings();render();};}
+    $$('[data-del-socio]').forEach(b=>b.onclick=()=>{
+      const id=b.dataset.delSocio, usados=S.loans.filter(l=>l.gestorId===id).length;
+      if(!confirm(usados?`Este socio tiene ${usados} préstamo(s) asignado(s). Esos préstamos conservan su nombre y reparto, pero no podrás elegirlo en préstamos nuevos. ¿Eliminarlo de la lista?`:'¿Eliminar este socio de la lista?'))return;
+      S.settings.socios=(S.settings.socios||[]).filter(s=>s.id!==id);
+      saveSettings();render();});
     $('#fb-conectar').onclick=()=>{
       const raw=$('#fb-config').value.trim(),code=$('#fb-code').value.trim();
       if(!raw||!code)return alert('Pegá la configuración de Firebase y elegí un código de negocio.');
