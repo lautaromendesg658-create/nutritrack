@@ -638,7 +638,11 @@ function vPrestamo(id){
     <div class="stat ${moraTot>0?'red':'green'}"><div class="lbl">Mora acumulada</div><div class="val" style="font-size:17px">${fmt$(moraTot)}</div></div>
   </div>
   ${(()=>{const r=loanReparto(l);
-    if(!r.compartido)return '';
+    if(!r.compartido)return `<h2>🤝 Reparto de ganancia</h2>
+    <div class="list" style="padding:14px">
+      <div class="t2" style="margin-bottom:10px">Esta ganancia es toda para vos. Si la gestiona un socio, podés repartirla.</div>
+      <button class="btn mini" data-reparto="${id}">+ Compartir con un socio</button>
+    </div>`;
     return `<h2>🤝 Reparto de ganancia</h2>
     <div class="list" style="padding:14px">
       <div class="t2" style="margin-bottom:10px">Ganancia del préstamo: <b style="color:var(--gold)">${fmt$(r.gananciaTotal)}</b><br><span style="font-size:11px">interés + mora y cobrador cobrados</span></div>
@@ -646,10 +650,11 @@ function vPrestamo(id){
         <div class="mid"><div class="t1" style="font-size:14px">Mi parte (${r.miPct}%)</div>
         <div class="t2">cobrado hasta ahora: ${fmt$(r.miParteReal)}</div></div>
         <div class="end"><div class="m1" style="color:var(--green)">${fmt$(r.miParteTotal)}</div></div></div>
-      <div class="cuota" style="padding:10px 0;border-bottom:none"><div class="num">${esc(ini(r.socioNom))}</div>
+      <div class="cuota" style="padding:10px 0"><div class="num">${esc(ini(r.socioNom))}</div>
         <div class="mid"><div class="t1" style="font-size:14px">${esc(r.socioNom)} (${r.socioPct}%)</div>
         <div class="t2">cobrado hasta ahora: ${fmt$(r.socioParteReal)}</div></div>
         <div class="end"><div class="m1" style="color:var(--blue)">${fmt$(r.socioParteTotal)}</div></div></div>
+      <button class="btn sec mini" data-reparto="${id}" style="margin-top:4px">✏️ Editar reparto</button>
     </div>`;})()}
   <h2>🗓 Cuotas</h2>
   <div class="list">${l.cuotas.map(c=>{
@@ -1096,6 +1101,72 @@ function formPrestamo(clientId){
   };
 }
 
+function formReparto(loanId){
+  const l=loan(loanId);if(!l)return;
+  const yaComp=!!(l.gestorId&&l.gestorPct);
+  const pctActual=yaComp?l.gestorPct:50;
+  modal(`<h3>Reparto de ganancia</h3>
+  <div class="hint">Ganancia de este préstamo: <b>${fmt$(loanGananciaProyectada(l))}</b> (interés + mora y cobrador cobrados). Elegí si la compartís con un socio y qué porcentaje le toca.</div>
+  <label>Reparto</label>
+  <div class="seg" id="r-modo">
+    <button data-v="0" class="${yaComp?'':'on'}">Toda para mí</button>
+    <button data-v="1" class="${yaComp?'on':''}">Compartir con socio</button>
+  </div>
+  <div id="r-sociobox" style="display:${yaComp?'':'none'}">
+    <div class="frow" style="margin-top:10px">
+      <div><label>Socio gestor</label>
+        <select id="r-socio">${(S.settings.socios||[]).map(s=>`<option value="${s.id}" ${s.id===l.gestorId?'selected':''}>${esc(s.nombre)}</option>`).join('')}
+          <option value="__nuevo__">➕ Agregar socio nuevo…</option></select></div>
+      <div><label>% para el socio</label><input id="r-pct" type="number" inputmode="decimal" value="${pctActual}" min="0" max="100"></div>
+    </div>
+    <div class="resume" id="r-resume"></div>
+  </div>
+  <button class="btn" id="r-save" style="margin-top:16px">Guardar reparto</button>`);
+  let compartir=yaComp;
+  const upd=()=>{
+    if(!compartir)return;
+    const g=loanGananciaProyectada(l);
+    const sel=$('#r-socio'), nom=sel&&sel.value!=='__nuevo__'&&sel.selectedOptions.length?sel.selectedOptions[0].textContent:'Socio';
+    const sp=Math.max(0,Math.min(100,+$('#r-pct').value||0)), mp=100-sp;
+    $('#r-resume').innerHTML=`Tu parte (${mp}%): <b>${fmt$(Math.round(g*mp/100))}</b><br>${esc(nom)} (${sp}%): <b>${fmt$(Math.round(g*sp/100))}</b>`;
+  };
+  $$('#r-modo button').forEach(b=>b.onclick=()=>{
+    compartir=b.dataset.v==='1';
+    $$('#r-modo button').forEach(x=>x.classList.toggle('on',x===b));
+    if(compartir&&!(S.settings.socios||[]).length){
+      const nom=prompt('¿Nombre del socio que gestiona este cliente?');
+      if(nom&&nom.trim()){
+        const s={id:uid(),nombre:nom.trim()};S.settings.socios.push(s);saveSettings();
+        $('#r-socio').insertAdjacentHTML('afterbegin',`<option value="${s.id}" selected>${esc(s.nombre)}</option>`);
+      }else{compartir=false;$$('#r-modo button').forEach(x=>x.classList.toggle('on',x.dataset.v==='0'));}
+    }
+    $('#r-sociobox').style.display=compartir?'':'none';upd();
+  });
+  $('#r-socio').addEventListener('change',e=>{
+    if(e.target.value==='__nuevo__'){
+      const nom=prompt('Nombre del nuevo socio:');
+      if(nom&&nom.trim()){
+        const s={id:uid(),nombre:nom.trim()};S.settings.socios.push(s);saveSettings();
+        e.target.insertAdjacentHTML('afterbegin',`<option value="${s.id}">${esc(s.nombre)}</option>`);
+        e.target.value=s.id;
+      }else{e.target.selectedIndex=0;}
+    }
+    upd();
+  });
+  $('#r-pct').addEventListener('input',upd);
+  upd();
+  $('#r-save').onclick=()=>{
+    if(compartir){
+      const sid=$('#r-socio').value;
+      if(!sid||sid==='__nuevo__')return alert('Elegí o agregá el socio que gestiona el préstamo');
+      l.gestorId=sid; l.gestorPct=Math.max(0,Math.min(100,+$('#r-pct').value||0)); l.gestorNombre=socioNombre(sid);
+    }else{
+      delete l.gestorId; delete l.gestorPct; delete l.gestorNombre;
+    }
+    saveLoan(l);closeModal();render();
+  };
+}
+
 function formFecha(loanId,nCuota){
   const l=loan(loanId);if(!l)return;
   const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
@@ -1344,6 +1415,7 @@ function bindView(){
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
   $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.fecha.split('|');formFecha(id,+n);});
+  $$('[data-reparto]').forEach(b=>b.onclick=()=>formReparto(b.dataset.reparto));
   $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
   $$('[data-cal]').forEach(b=>b.onclick=()=>{calRef=new Date(calRef.getFullYear(),calRef.getMonth()+ +b.dataset.cal,1);render();});
   $$('[data-day]').forEach(b=>b.onclick=()=>{calSel=b.dataset.day;render();});
