@@ -686,6 +686,24 @@ function vPrestamo(id){
 function generarContrato(id){
   const l=loan(id); if(!l)return;
   const cl=client(l.clientId)||{};
+  const sugerido=(l.tipo==='comercial'||cl.tipo==='comercio')?'comercial':'personal';
+  modal(`<h3>Generar contrato</h3>
+  <div class="hint">Elegí el tipo de contrato. Se arma con los datos de <b>${esc(cl.nombre||'el cliente')}</b> y de este préstamo.</div>
+  <label>Tipo de contrato</label>
+  <div class="seg" id="ct-tipo">
+    <button data-v="personal" class="${sugerido==='personal'?'on':''}">👤 Personal</button>
+    <button data-v="comercial" class="${sugerido==='comercial'?'on':''}">🏪 Comercial</button>
+  </div>
+  <button class="btn" id="ct-go" style="margin-top:16px">📄 Generar contrato</button>`);
+  let tipo=sugerido;
+  $$('#ct-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
+    $$('#ct-tipo button').forEach(x=>x.classList.toggle('on',x===b));});
+  $('#ct-go').onclick=()=>{closeModal();armarContrato(id,tipo);};
+}
+function armarContrato(id,tipo){
+  const l=loan(id); if(!l)return;
+  const cl=client(l.clientId)||{};
+  const esCom=tipo==='comercial';
   const m=S.settings.mora||{tipo:'pct',valor:5,porDia:false};
   const cob=S.settings.cobrador||{dias:3,monto:15000};
   const moraTxt=(m.tipo==='pct'
@@ -694,8 +712,19 @@ function generarContrato(id){
   const ult=l.cuotas[l.cuotas.length-1];
   const hoy=new Date();
   const fHoy=hoy.toLocaleDateString('es-AR',{day:'numeric',month:'long',year:'numeric'});
+  const titulo=esCom?'CONTRATO DE PRÉSTAMO COMERCIAL':'CONTRATO DE PRÉSTAMO PERSONAL';
+  const intro=esCom
+    ? `Entre <b>PRESTAMOS PPP</b>, en adelante "El Prestamista", y el comercio/empresa <b>${esc((cl.nombre||'').toUpperCase())}</b>${cl.direccion?', con domicilio comercial en '+esc(cl.direccion):''}, en adelante "El Prestatario", se celebra el presente contrato de préstamo comercial destinado a capital de trabajo y/o la actividad comercial del Prestatario, sujeto a las siguientes cláusulas:`
+    : `Entre <b>PRESTAMOS PPP</b>, en adelante "El Prestamista", y el/la Sr(a). <b>${esc((cl.nombre||'').toUpperCase())}</b>, titular del préstamo, en adelante "El Prestatario", se celebra el presente contrato, mediante el cual ambas partes aceptan las condiciones establecidas de mutuo acuerdo, sujetas a las siguientes cláusulas:`;
+  const lblNombre=esCom?'Razón Social / Comercio:':'Nombre del Cliente:';
+  const lblDoc=esCom?'CUIT / DNI:':'DNI / CUIT:';
+  const lblDom=esCom?'Domicilio Comercial:':'Domicilio:';
+  const clausulaDestino=esCom
+    ? '<li>El Prestatario declara que los fondos recibidos serán destinados exclusivamente a su actividad comercial y/o capital de trabajo, asumiendo plena responsabilidad sobre su repago con los ingresos de dicha actividad.</li>'
+    : '';
+  const firmaLbl=esCom?'El Prestatario (Comercio)':'El Prestatario';
   const html=`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>Contrato - ${esc(cl.nombre||'')}</title>
+<title>Contrato ${esCom?'comercial':'personal'} - ${esc(cl.nombre||'')}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',Arial,sans-serif}
   body{background:#fff;color:#1f2937}
@@ -746,13 +775,13 @@ function generarContrato(id){
     <div class="pesos">$ $ $</div>
   </div>
   <div class="cuerpo">
-    <h2>CONTRATO DE PRÉSTAMO</h2><div class="sub"></div>
-    <p class="intro">Entre <b>PRESTAMOS PPP</b>, en adelante "El Prestamista", y el/la Sr(a). <b>${esc((cl.nombre||'').toUpperCase())}</b>, titular del préstamo, en adelante "El Prestatario", se celebra el presente contrato, mediante el cual ambas partes aceptan las condiciones establecidas de mutuo acuerdo, sujetas a las siguientes cláusulas:</p>
+    <h2>${titulo}</h2><div class="sub"></div>
+    <p class="intro">${intro}</p>
     <h3>DATOS DEL PRÉSTAMO</h3>
     <table>
-      <tr><td class="k">Nombre del Cliente:</td><td>${esc((cl.nombre||'—').toUpperCase())}</td></tr>
-      <tr><td class="k">DNI / CUIT:</td><td>${esc(cl.dni||'—')}</td></tr>
-      <tr><td class="k">Domicilio:</td><td>${esc(cl.direccion||'—')}</td></tr>
+      <tr><td class="k">${lblNombre}</td><td>${esc((cl.nombre||'—').toUpperCase())}</td></tr>
+      <tr><td class="k">${lblDoc}</td><td>${esc(cl.dni||'—')}</td></tr>
+      <tr><td class="k">${lblDom}</td><td>${esc(cl.direccion||'—')}</td></tr>
       <tr><td class="k">Monto del Préstamo:</td><td>${fmt$(l.monto)}</td></tr>
       <tr><td class="k">Total a Devolver:</td><td>${fmt$(l.total)}</td></tr>
       <tr><td class="k">Fecha de Inicio:</td><td>${dLong(l.inicio)}</td></tr>
@@ -765,6 +794,7 @@ function generarContrato(id){
     <h3>CLÁUSULAS</h3>
     <ul>
       <li>El Prestatario se compromete a pagar el préstamo en las cuotas y plazos según el cronograma establecido.</li>
+      ${clausulaDestino}
       <li>Cada cuota incluye una parte del capital e intereses acordados entre las partes.</li>
       <li>En caso de atraso en el pago, se aplicarán los intereses moratorios estipulados en este contrato.</li>
       <li>De no abonarse las cuotas en tiempo y forma, transcurridos ${cob.dias} día${cob.dias==1?'':'s'} de atraso, El Prestamista queda facultado para disponer la visita de un cobrador al domicilio declarado por El Prestatario —el estipulado en su DNI y/o el consignado en el presente contrato—, a fin de gestionar el cobro de la deuda de manera presencial, pudiendo asimismo proceder a la fijación de avisos o carteles de deuda. Los gastos de dicha gestión de cobranza correrán por cuenta exclusiva del Prestatario y se sumarán al saldo adeudado.</li>
@@ -773,7 +803,7 @@ function generarContrato(id){
     </ul>
     <p class="cierre">Ambas partes declaran haber leído y comprendido el presente contrato, aceptando voluntariamente todas sus condiciones. Firmado en Zona Sur, Buenos Aires, el día ${fHoy}.</p>
     <div class="firmas">
-      <div class="firma"><div class="linea">El Prestatario</div><div class="quien">${esc((cl.nombre||'').toUpperCase())}${cl.dni?' · DNI '+esc(cl.dni):''}</div></div>
+      <div class="firma"><div class="linea">${firmaLbl}</div><div class="quien">${esc((cl.nombre||'').toUpperCase())}${cl.dni?(esCom?' · CUIT ':' · DNI ')+esc(cl.dni):''}</div></div>
       <div class="firma"><div class="linea">El Prestamista</div><div class="quien">PRESTAMOS PPP</div></div>
     </div>
   </div>
