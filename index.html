@@ -749,6 +749,119 @@ function enviarTyC(loanId){
   waOpen(cl.telefono,tycTexto(l));
 }
 
+/* ----- PDF nativo del contrato (jsPDF local, sin CDN) ----- */
+function loadPdfLib(){
+  if(window.jspdf&&window.jspdf.jsPDF)return Promise.resolve();
+  if(window.__pdfLibPromise)return window.__pdfLibPromise;
+  window.__pdfLibPromise=new Promise((ok,err)=>{
+    const s=document.createElement('script');s.src='./jspdf.umd.min.js';
+    s.onload=ok;s.onerror=()=>err(new Error('No se pudo cargar el generador de PDF'));
+    document.head.appendChild(s);
+  });
+  return window.__pdfLibPromise;
+}
+function buildContratoPDF(l,tipo){
+  const cl=client(l.clientId)||{}, esCom=tipo==='comercial';
+  const m=S.settings.mora||{tipo:'pct',valor:5,porDia:false};
+  const cob=S.settings.cobrador||{dias:3,monto:15000};
+  const ult=l.cuotas[l.cuotas.length-1];
+  const moraTxt=(m.tipo==='pct'?fmt$(Math.round(l.cuotas[0].monto*(Number(m.valor)||0)/100)):fmt$(Number(m.valor)||0))+(m.porDia?' por cada día de atraso':'');
+  const fHoy=new Date().toLocaleDateString('es-AR',{day:'numeric',month:'long',year:'numeric'});
+  const doc=new window.jspdf.jsPDF({unit:'pt',format:'a4'});
+  const W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), M=42;
+  let y=0;
+  const ensure=need=>{if(y+need>H-46){doc.addPage();y=50;}};
+  const para=(txt,size,col,font,lh,gap)=>{doc.setFont('helvetica',font||'normal');doc.setFontSize(size);doc.setTextColor(col[0],col[1],col[2]);
+    doc.splitTextToSize(txt,W-2*M).forEach(ln=>{ensure(lh);doc.text(ln,M,y);y+=lh;});if(gap)y+=gap;};
+  const bullet=txt=>{doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor(55,65,81);
+    const lines=doc.splitTextToSize(txt,W-2*M-14);lines.forEach((ln,i)=>{ensure(12.5);if(i===0){doc.setFont('helvetica','bold');doc.text('•',M,y);doc.setFont('helvetica','normal');}doc.text(ln,M+14,y);y+=12.5;});y+=4;};
+  const heading=t=>{ensure(28);doc.setFont('helvetica','bold');doc.setFontSize(11.5);doc.setTextColor(19,71,107);doc.text(t,M,y);
+    doc.setDrawColor(209,213,219);doc.line(M,y+5,W-M,y+5);y+=20;};
+  // encabezado
+  doc.setFillColor(13,46,71);doc.rect(0,0,W,92,'F');
+  doc.setFillColor(31,157,122);doc.rect(0,92,W,5,'F');
+  doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(23);doc.text('PRESTAMOS PPP',M,44);
+  doc.setTextColor(31,157,122);doc.setFontSize(10);doc.text('COMERCIALES Y PERSONALES',M,61);
+  doc.setTextColor(200,210,225);doc.setFont('helvetica','italic');doc.setFontSize(8.5);doc.text('Agilidad y Confianza  ·  Zona Sur',M,75);
+  doc.setTextColor(61,90,117);doc.setFont('helvetica','bold');doc.setFontSize(30);doc.text('$   $   $',W-M,58,{align:'right'});
+  y=132;
+  // título
+  doc.setTextColor(19,71,107);doc.setFont('helvetica','bold');doc.setFontSize(16);
+  doc.text(esCom?'CONTRATO DE PRÉSTAMO COMERCIAL':'CONTRATO DE PRÉSTAMO PERSONAL',W/2,y,{align:'center'});
+  doc.setFillColor(31,157,122);doc.rect(W/2-30,y+8,60,3,'F');y+=34;
+  // intro
+  const intro=esCom
+    ?`Entre PRESTAMOS PPP, en adelante "El Prestamista", y el comercio/empresa ${(cl.nombre||'').toUpperCase()}${cl.direccion?', con domicilio comercial en '+cl.direccion:''}, en adelante "El Prestatario", se celebra el presente contrato de préstamo comercial destinado a capital de trabajo y/o la actividad comercial del Prestatario, sujeto a las siguientes cláusulas:`
+    :`Entre PRESTAMOS PPP, en adelante "El Prestamista", y el/la Sr(a). ${(cl.nombre||'').toUpperCase()}, titular del préstamo, en adelante "El Prestatario", se celebra el presente contrato, mediante el cual ambas partes aceptan las condiciones establecidas de mutuo acuerdo, sujetas a las siguientes cláusulas:`;
+  para(intro,10,[55,65,81],'normal',14,14);
+  // datos
+  heading('DATOS DEL PRÉSTAMO');
+  const rows=[
+    [esCom?'Razón Social / Comercio:':'Nombre del Cliente:',(cl.nombre||'—').toUpperCase()],
+    [esCom?'CUIT / DNI:':'DNI / CUIT:',cl.dni||'—'],
+    [esCom?'Domicilio Comercial:':'Domicilio:',cl.direccion||'—'],
+    ['Monto del Préstamo:',fmt$(l.monto)],
+    ['Total a Devolver:',fmt$(l.total)],
+    ['Fecha de Inicio:',dLong(l.inicio)],
+    ['Fecha de Finalización:',dLong(ult.vence)],
+    ['Número de Cuotas:',String(l.cuotas.length)],
+    ['Valor de la Cuota:',fmt$(l.cuotas[0].monto)],
+    ['Modalidad:',FREQ[l.frecuencia]],
+    ['Mora por Cuota:',moraTxt]
+  ];
+  rows.forEach((r,i)=>{ensure(18);if(i%2===0){doc.setFillColor(241,245,249);doc.rect(M,y-11,W-2*M,18,'F');}
+    doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(13,46,71);doc.text(r[0],M+6,y);
+    doc.setFont('helvetica','normal');doc.setTextColor(40,40,40);doc.text(String(r[1]),M+(W-2*M)*0.42,y);y+=18;});
+  y+=14;
+  // cláusulas
+  heading('CLÁUSULAS');
+  const cls=['El Prestatario se compromete a pagar el préstamo en las cuotas y plazos según el cronograma establecido.'];
+  if(esCom)cls.push('El Prestatario declara que los fondos recibidos serán destinados exclusivamente a su actividad comercial y/o capital de trabajo, asumiendo plena responsabilidad sobre su repago con los ingresos de dicha actividad.');
+  cls.push('Cada cuota incluye una parte del capital e intereses acordados entre las partes.');
+  cls.push('En caso de atraso en el pago, se aplicarán los intereses moratorios estipulados en este contrato.');
+  cls.push(`De no abonarse las cuotas en tiempo y forma, transcurridos ${cob.dias} día${cob.dias==1?'':'s'} de atraso, El Prestamista queda facultado para disponer la visita de un cobrador al domicilio declarado por El Prestatario —el estipulado en su DNI y/o el consignado en el presente contrato—, a fin de gestionar el cobro de la deuda de manera presencial, pudiendo asimismo proceder a la fijación de avisos o carteles de deuda. Los gastos de dicha gestión de cobranza correrán por cuenta exclusiva del Prestatario y se sumarán al saldo adeudado.`);
+  cls.push('El Prestamista podrá tomar las acciones legales correspondientes en caso de incumplimiento reiterado.');
+  cls.push('Este contrato tiene validez legal y podrá ser presentado como soporte en las instancias que correspondan.');
+  cls.forEach(bullet);
+  y+=6;
+  para(`Ambas partes declaran haber leído y comprendido el presente contrato, aceptando voluntariamente todas sus condiciones. Firmado en Zona Sur, Buenos Aires, el día ${fHoy}.`,9.5,[55,65,81],'normal',13,10);
+  // firmas
+  ensure(56);y+=16;
+  const colW=(W-2*M-30)/2, sy=y;
+  doc.setDrawColor(150,150,150);
+  doc.line(M,sy,M+colW,sy);doc.line(W-M-colW,sy,W-M,sy);
+  doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(13,46,71);
+  doc.text(esCom?'El Prestatario (Comercio)':'El Prestatario',M,sy+14);
+  doc.text('El Prestamista',W-M-colW,sy+14);
+  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(110,110,110);
+  doc.text((cl.nombre||'').toUpperCase()+(cl.dni?(esCom?'  ·  CUIT ':'  ·  DNI ')+cl.dni:''),M,sy+26);
+  doc.text('PRESTAMOS PPP',W-M-colW,sy+26);
+  // pie en todas las páginas
+  const np=doc.getNumberOfPages();
+  for(let p=1;p<=np;p++){doc.setPage(p);
+    doc.setFillColor(31,157,122);doc.rect(0,H-38,W,4,'F');
+    doc.setFillColor(13,46,71);doc.rect(0,H-34,W,34,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8);
+    doc.text('PRESTAMOS PPP  ·  Comerciales y Personales  ·  Agilidad y Confianza  ·  Zona Sur',W/2,H-14,{align:'center'});}
+  return doc;
+}
+async function compartirContratoPDF(l,tipo){
+  const cl=client(l.clientId)||{};
+  await loadPdfLib();
+  const doc=buildContratoPDF(l,tipo);
+  const blob=doc.output('blob');
+  const fname='Contrato_'+(cl.nombre||'cliente').replace(/[^\w]+/g,'_')+'.pdf';
+  const file=new File([blob],fname,{type:'application/pdf'});
+  if(navigator.canShare&&navigator.canShare({files:[file]})){
+    try{await navigator.share({files:[file],title:'Contrato PRESTAMOS PPP',text:'Contrato de '+(cl.nombre||'')});return 'shared';}
+    catch(e){if(e&&e.name==='AbortError')return 'cancel';throw e;}
+  }
+  // sin Web Share (ej. PC): descarga el PDF para adjuntarlo
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=fname;a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),8000);
+  return 'download';
+}
+
 /* ================= CONTRATO PDF ================= */
 function generarContrato(id){
   const l=loan(id); if(!l)return;
@@ -886,19 +999,28 @@ function armarContrato(id,tipo){
 <div class="printbar"><button onclick="window.print()">🖨 Imprimir / Guardar PDF</button></div>
 </body></html>`;
   const tel=(cl.telefono||'').replace(/\D/g,'');
+  loadPdfLib().catch(()=>{}); // precargar para que el envío sea instantáneo
   const ov=document.createElement('div');ov.className='cview';
   ov.innerHTML=`<div class="cbar">
     <button class="cclose">✕</button>
-    <button class="cwa">📲 Enviar</button>
-    <button class="cprint">🖨 PDF</button>
+    <button class="cwa">📲 Enviar PDF</button>
+    <button class="cprint">🖨 Imprimir</button>
   </div><iframe></iframe>`;
   document.body.appendChild(ov);
   const f=ov.querySelector('iframe');f.srcdoc=html;
   ov.querySelector('.cclose').onclick=()=>ov.remove();
-  ov.querySelector('.cwa').onclick=()=>{
-    if(!tel)return alert('Este cliente no tiene teléfono cargado. Agregalo en la ficha del cliente para enviarle el contrato por WhatsApp.');
-    if(confirm('Se abrirá WhatsApp con el contrato en texto, listo para enviar a '+(cl.nombre||'el cliente')+'.\n\nPara mandar además el PDF con el membrete, usá "🖨 PDF", guardalo y adjuntalo en el chat.'))
-      waOpen(cl.telefono,contratoTexto(l,tipo));
+  const waBtn=ov.querySelector('.cwa');
+  waBtn.onclick=async()=>{
+    const prev=waBtn.textContent;waBtn.textContent='⏳ Generando…';waBtn.disabled=true;
+    try{
+      const r=await compartirContratoPDF(l,tipo);
+      if(r==='download')alert('Tu dispositivo no permite compartir archivos directamente (suele pasar en la PC).\n\nDescargué el PDF del contrato: adjuntalo en el chat de WhatsApp del cliente.');
+    }catch(e){
+      console.error(e);
+      if(confirm('No se pudo generar el PDF en este dispositivo. ¿Querés enviar el contrato como mensaje de texto por WhatsApp?')){
+        if(!tel)alert('El cliente no tiene teléfono cargado.');else waOpen(cl.telefono,contratoTexto(l,tipo));
+      }
+    }finally{waBtn.textContent=prev;waBtn.disabled=false;}
   };
   ov.querySelector('.cprint').onclick=()=>{
     try{f.contentWindow.focus();f.contentWindow.print();}
