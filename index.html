@@ -609,7 +609,8 @@ function rowLoan(l){
       <div class="t2">${l.tipo==='comercial'?'Comercial':'Personal'} · ${FREQ[l.frecuencia]} · ${l.cuotas.length} cuotas
       ${next?' · próx. '+dShort(next.vence):''}</div>
       <div class="progress"><i style="width:${pct}%"></i></div></div>
-    <div class="end"><div class="m1">${fmt$(l.total)}</div><div class="m2">${pct}% cobrado</div></div>
+    <div class="end" style="margin-right:14px"><div class="m1" style="color:var(--gold)">${fmt$(l.monto)}</div><div class="m2">prestado</div></div>
+    <div class="end"><div class="m1">${fmt$(l.total)}</div><div class="m2">a cobrar · ${pct}%</div></div>
   </div>`;
 }
 function vPrestamos(){
@@ -617,12 +618,18 @@ function vPrestamos(){
   if(loanFilter==='activos')ls=ls.filter(l=>l.status==='activo');
   else if(loanFilter==='atrasados')ls=ls.filter(l=>l.status==='activo'&&loanTieneVencidas(l));
   else if(loanFilter==='pagados')ls=ls.filter(l=>l.status!=='activo');
+  const sumPrestado=ls.reduce((a,l)=>a+(l.monto||0),0);
+  const sumTotal=ls.reduce((a,l)=>a+(l.total||0),0);
   return `
   <div class="chips">
     ${[['activos','Activos'],['atrasados','Atrasados'],['pagados','Finalizados'],['todos','Todos']].map(([k,t])=>
       `<button class="${loanFilter===k?'on':''}" data-lf="${k}">${t}</button>`).join('')}
   </div>
-  <div class="list">${ls.length?ls.map(rowLoan).join(''):'<div class="empty">No hay préstamos en esta vista.<br>Tocá + para crear uno.</div>'}</div>`;
+  ${ls.length?`<div class="resume" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Plata prestada: <b style="color:var(--gold)">${fmt$(sumPrestado)}</b></span>
+    <span>A cobrar: <b>${fmt$(sumTotal)}</b></span>
+  </div>`:''}
+  <div class="list" style="margin-top:12px">${ls.length?ls.map(rowLoan).join(''):'<div class="empty">No hay préstamos en esta vista.<br>Tocá + para crear uno.</div>'}</div>`;
 }
 function vPrestamo(id){
   const l=loan(id); if(!l)return '<div class="empty">Préstamo no encontrado</div>';
