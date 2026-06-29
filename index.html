@@ -63,6 +63,14 @@
   .item .end{text-align:right;flex-shrink:0}
   .item .m1{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
   .item .m2{font-size:11px;color:var(--muted);margin-top:2px}
+  .chev{font-size:11px;color:var(--muted);margin-left:2px}
+  .rephdr:active{background:var(--panel-2)}
+  .repbox{background:var(--panel-2);border-bottom:1px solid var(--line)}
+  .repsub{display:flex;align-items:center;gap:12px;padding:11px 14px 11px 24px;border-top:1px solid var(--line);cursor:pointer}
+  .repsub:active{background:var(--bg)}
+  .repsub .mid{flex:1;min-width:0}
+  .repsub .t1{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .repsub .end{flex-shrink:0;text-align:right}
   .empty{padding:34px 20px;text-align:center;color:var(--muted);font-style:italic;font-size:14px;line-height:1.5}
 
   .badge{display:inline-block;font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;
@@ -447,7 +455,7 @@ setInterval(tickClock,1000);tickClock();
 setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
 
 /* ================= NAVEGACIÓN ================= */
-let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='';
+let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', repartoOpen=new Set();
 $$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
 $('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
 function go(v,detail){VIEW=v;DETAIL=detail||null;render();}
@@ -493,23 +501,36 @@ function vInicio(){
   const interes=activos.reduce((a,l)=>a+(l.total-l.monto),0);
 
   // reparto de ganancias por socio (sobre préstamos activos)
-  let miTotal=0,miReal=0; const porSocio={};
+  let miTotal=0,miReal=0; const misLoans=[]; const porSocio={};
   activos.forEach(l=>{const r=loanReparto(l);
     miTotal+=r.miParteTotal||0; miReal+=r.miParteReal||0;
+    misLoans.push({l,parte:r.miParteTotal||0,pct:r.compartido?r.miPct:100});
     if(r.compartido){const k=r.socioNom;
-      if(!porSocio[k])porSocio[k]={total:0,real:0};
-      porSocio[k].total+=r.socioParteTotal; porSocio[k].real+=r.socioParteReal;}});
+      if(!porSocio[k])porSocio[k]={total:0,real:0,loans:[]};
+      porSocio[k].total+=r.socioParteTotal; porSocio[k].real+=r.socioParteReal;
+      porSocio[k].loans.push({l,parte:r.socioParteTotal,pct:r.socioPct});}});
   const haySocios=Object.keys(porSocio).length>0;
+  const subItems=(loans,color)=>loans.length?loans.map(({l,parte,pct})=>{
+    const cl=client(l.clientId)||{nombre:'?'};
+    return `<div class="repsub" data-loan="${l.id}">
+      <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
+        <div class="t2">${l.tipo==='comercial'?'Comercial':'Personal'} · ${FREQ[l.frecuencia]} · ${pct}%</div></div>
+      <div class="end"><div class="m1" style="font-size:14px;color:${color}">${fmt$(parte)}</div></div>
+    </div>`;}).join(''):'<div class="repsub" style="cursor:default"><div class="t2">Sin préstamos asignados</div></div>';
+  const repRow=(key,ini2,avaCls,nombre,real,total,color,loans)=>{
+    const open=repartoOpen.has(key);
+    return `<div class="item rephdr" data-rep="${esc(key)}" style="cursor:pointer">
+      <div class="ava ${avaCls}">${esc(ini2)}</div>
+      <div class="mid"><div class="t1">${esc(nombre)} <span class="chev">${open?'▾':'▸'}</span></div>
+        <div class="t2">cobrado: ${fmt$(real)} · ${loans.length} préstamo${loans.length===1?'':'s'}</div></div>
+      <div class="end"><div class="m1" style="color:${color}">${fmt$(total)}</div><div class="m2">proyectado</div></div>
+    </div>${open?`<div class="repbox">${subItems(loans,color)}</div>`:''}`;
+  };
   const repartoHTML=haySocios?`
   <h2>🤝 Reparto de ganancias <span class="cnt">activos</span></h2>
   <div class="list">
-    <div class="item" style="cursor:default"><div class="ava">YO</div>
-      <div class="mid"><div class="t1">Mi parte</div><div class="t2">cobrado: ${fmt$(miReal)}</div></div>
-      <div class="end"><div class="m1" style="color:var(--green)">${fmt$(miTotal)}</div><div class="m2">proyectado</div></div></div>
-    ${Object.entries(porSocio).map(([nom,v])=>`<div class="item" style="cursor:default">
-      <div class="ava shop">${esc(ini(nom))}</div>
-      <div class="mid"><div class="t1">${esc(nom)}</div><div class="t2">cobrado: ${fmt$(v.real)}</div></div>
-      <div class="end"><div class="m1" style="color:var(--blue)">${fmt$(v.total)}</div><div class="m2">proyectado</div></div></div>`).join('')}
+    ${repRow('__yo__','YO','','Mi parte',miReal,miTotal,'var(--green)',misLoans)}
+    ${Object.entries(porSocio).map(([nom,v])=>repRow('s:'+nom,ini(nom),'shop',nom,v.real,v.total,'var(--blue)',v.loans)).join('')}
   </div>`:'';
 
   const rowCobro=({l,c})=>{
@@ -1658,6 +1679,8 @@ function bindView(){
   $$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
   $$('[data-cli]').forEach(b=>b.onclick=()=>go('clientes',b.dataset.cli));
   $$('[data-loan]').forEach(b=>b.onclick=()=>go('prestamos',b.dataset.loan));
+  $$('[data-rep]').forEach(b=>b.onclick=()=>{const k=b.dataset.rep;
+    repartoOpen.has(k)?repartoOpen.delete(k):repartoOpen.add(k);render();});
   $$('[data-cobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
   $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
