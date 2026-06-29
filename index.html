@@ -1505,7 +1505,7 @@ function formRenovar(viejoId){
   <label>¿Qué hago con el préstamo actual?</label>
   <div class="seg" id="rv-saldar">
     <button data-v="1" class="on">Saldarlo con la renovación</button>
-    <button data-v="0">Dejarlo aparte</button>
+    <button data-v="0">Sumar otro préstamo (sin cerrar este)</button>
   </div>
   <div class="resume" id="rv-resume">Completá monto y cuotas para ver el resumen.</div>
   <button class="btn" id="rv-save" style="margin-top:16px">🔄 Confirmar renovación</button>`);
@@ -1524,7 +1524,7 @@ function formRenovar(viejoId){
     $('#rv-resume').innerHTML=`Total a devolver del nuevo: <b>${fmt$(total)}</b> · ganancia ${fmt$(total-mm)}<br>`
       +`${n} cuotas ${{diaria:'diarias',semanal:'semanales',quincenal:'quincenales'}[f]} de <b>${fmt$(cs[0].monto)}</b><br>`
       +(saldar?`Se salda el préstamo actual (${fmt$(saldo)}).<br><span style="color:var(--gold)">Plata nueva en mano para el cliente: <b>${fmt$(enMano)}</b></span>`
-              :`El préstamo actual queda activo aparte.`)
+              :`El préstamo actual sigue abierto y se suma uno nuevo en paralelo.`)
       +(enMano<0?`<br><span style="color:var(--red)">⚠️ El monto nuevo es menor que el saldo. Revisalo.</span>`:'');
   };
   ['rv-monto','rv-int','rv-n','rv-freq','rv-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
