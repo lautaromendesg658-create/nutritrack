@@ -250,11 +250,17 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
+const DEF_REC={
+  hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
+  manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
+  vencido:'Hola {nombre}, tu cuota {cuota} venció el {fecha}. A hoy debés {total} (incluye mora). Por favor regularizá al alias {alias} para evitar el cargo del cobrador. — {negocio}'
+};
 const DEF_SETTINGS={
   nombreNegocio:'Mi Negocio', moneda:'$', alias:'PRESTAMOSPPP.1986',
   mora:{tipo:'pct', valor:10, porDia:false}, horaLimite:18,
   cobrador:{monto:0, dias:3},
   socios:[],
+  recordatorios:{...DEF_REC},
   updatedAt:0
 };
 let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[]};
@@ -262,7 +268,8 @@ try{const raw=localStorage.getItem(LS); if(raw){const p=JSON.parse(raw);
   S={settings:{...DEF_SETTINGS,...p.settings,
      mora:{...DEF_SETTINGS.mora,...(p.settings&&p.settings.mora||{})},
      cobrador:{...DEF_SETTINGS.cobrador,...(p.settings&&p.settings.cobrador||{})},
-     socios:(p.settings&&p.settings.socios)||[]},
+     socios:(p.settings&&p.settings.socios)||[],
+     recordatorios:{...DEF_REC,...(p.settings&&p.settings.recordatorios||{})}},
     clients:p.clients||[], loans:p.loans||[], docs:p.docs||[]};}}catch(e){}
 
 function persist(){try{localStorage.setItem(LS,JSON.stringify(S));}catch(e){
@@ -341,7 +348,7 @@ function loanReparto(l){ // devuelve {socioNom, socioPct, miPct, gananciaTotal, 
     socioParteReal:Math.round(gr*sp/100), miParteReal:Math.round(gr*mp/100)};
 }
 function refreshLoanStatus(l){
-  if(l.status==='cancelado')return;
+  if(l.status==='cancelado'||l.status==='renovado')return;
   l.status=loanRestante(l)<=0?'pagado':'activo';
 }
 function genCuotas(total,n,freq,inicio,skipSun){
@@ -478,13 +485,13 @@ function applyBiz(){$('#bizname').textContent=S.settings.nombreNegocio||'PrestaC
 /* ================= VISTA: INICIO ================= */
 function cobrosDelDia(fecha){
   const out=[];
-  S.loans.forEach(l=>{if(l.status==='cancelado')return;
+  S.loans.forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
     l.cuotas.forEach(c=>{if(c.vence===fecha)out.push({l,c});});});
   return out;
 }
 function cobrosVencidos(){
   const t=todayStr(),out=[];
-  S.loans.forEach(l=>{if(l.status==='cancelado')return;
+  S.loans.forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
     l.cuotas.forEach(c=>{if(cRestante(c)>0&&(c.vence<t||(c.vence===t&&Date.now()>dueAt(c.vence).getTime())))out.push({l,c});});});
   out.sort((a,b)=>a.c.vence<b.c.vence?-1:1);
   return out;
@@ -558,6 +565,7 @@ function vInicio(){
     <div class="stat red"><div class="lbl">Vencidos</div><div class="val">${fmt$(vencMonto)}</div><div class="ex">${venc.length} cuota${venc.length===1?'':'s'} con mora</div></div>
     <div class="stat green"><div class="lbl">Interés en juego</div><div class="val">${fmt$(interes)}</div><div class="ex">ganancia de préstamos activos</div></div>
   </div>
+  <button class="btn" id="rec-btn" style="background:#25D366;color:#fff;margin-top:4px">🔔 Recordatorios · ${recLista('hoy').length} hoy · ${recLista('vencido').length} vencidos</button>
   ${repartoHTML}
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
@@ -626,6 +634,7 @@ function rowLoan(l){
   const late=loanTieneVencidas(l);
   const badge=l.status==='pagado'?'<span class="badge b-ok">Pagado</span>'
     :l.status==='cancelado'?'<span class="badge b-fut">Cancelado</span>'
+    :l.status==='renovado'?'<span class="badge b-com">Renovado</span>'
     :late?'<span class="badge b-ven">Atrasado</span>':'<span class="badge b-hoy">Activo</span>';
   return `<div class="item" data-loan="${l.id}">
     <div class="ava ${l.tipo==='comercial'?'shop':''}">${esc(ini(cl.nombre))}</div>
@@ -662,6 +671,8 @@ function vPrestamo(id){
   const moraTot=l.cuotas.reduce((a,c)=>a+moraDe(c)+cobradorDe(c),0);
   return `
   <button class="back" data-go="prestamos">← Préstamos</button>
+  ${l.renovadoDe&&loan(l.renovadoDe)?`<div class="list" style="padding:11px 14px;margin-bottom:12px"><div class="t2" data-loan="${l.renovadoDe}" style="cursor:pointer">🔄 Renovación de un préstamo anterior${l.refinanciado?` · se refinanció ${fmt$(l.refinanciado)}`:''} · <span style="color:var(--gold)">ver original ›</span></div></div>`:''}
+  ${l.status==='renovado'&&l.renovadoEn&&loan(l.renovadoEn)?`<div class="list" style="padding:11px 14px;margin-bottom:12px"><div class="t2" data-loan="${l.renovadoEn}" style="cursor:pointer">🔄 Este préstamo fue renovado · <span style="color:var(--gold)">ver préstamo nuevo ›</span></div></div>`:''}
   <div class="stats" style="grid-template-columns:repeat(2,1fr)">
     <div class="stat gold"><div class="lbl">${esc(cl.nombre)}</div><div class="val" style="font-size:17px">${l.tipo==='comercial'?'Comercial':'Personal'} · ${FREQ[l.frecuencia]}</div>
       <div class="ex">inició ${dLong(l.inicio)}</div></div>
@@ -713,6 +724,7 @@ function vPrestamo(id){
     <button class="btn" data-contrato="${id}" style="background:var(--blue);color:#fff">📄 Generar contrato</button>
     <button class="btn" data-tyc="${id}" style="background:#25D366;color:#fff">📲 Enviar T&C</button>
   </div>
+  ${l.status==='activo'?`<button class="btn" data-renovar="${id}" style="margin-top:10px;background:var(--gold);color:#14110a">🔄 Renovar préstamo</button>`:''}
   <div class="btnrow">
     ${l.status==='activo'?`<button class="btn red" data-cancel-loan="${id}">Cancelar préstamo</button>`:''}
     <button class="btn red" data-del-loan="${id}">🗑 Eliminar</button>
@@ -783,6 +795,61 @@ function enviarTyC(loanId){
   const cl=client(l.clientId)||{};
   if(!(cl.telefono||'').replace(/\D/g,''))return alert('Este cliente no tiene teléfono cargado. Agregalo en la ficha del cliente para poder enviarle los términos por WhatsApp.');
   waOpen(cl.telefono,tycTexto(l));
+}
+
+/* ----- RECORDATORIOS DE VENCIMIENTO ----- */
+function recLista(tipo){
+  const t=todayStr(), man=ymd(new Date(pd(t).getTime()+DAY)), out=[];
+  S.loans.forEach(l=>{if(l.status!=='activo')return;
+    l.cuotas.forEach(c=>{if(cRestante(c)<=0)return;
+      if(tipo==='hoy'&&c.vence===t)out.push({l,c});
+      else if(tipo==='manana'&&c.vence===man)out.push({l,c});
+      else if(tipo==='vencido'&&c.vence<t)out.push({l,c});});});
+  out.sort((a,b)=>a.c.vence<b.c.vence?-1:1);
+  return out;
+}
+function recMsg(tipo,l,c){
+  const cl=client(l.clientId)||{};
+  const tpl=(S.settings.recordatorios||{})[tipo]||DEF_REC[tipo];
+  const total=cRestante(c)+moraDe(c)+cobradorDe(c);
+  const map={
+    '{nombre}':cl.nombre||'', '{cuota}':c.n+'/'+l.cuotas.length,
+    '{monto}':fmt$(cRestante(c)), '{mora}':fmt$(moraDe(c)), '{total}':fmt$(total),
+    '{fecha}':dLong(c.vence), '{alias}':S.settings.alias||'',
+    '{hora}':String(S.settings.horaLimite||18), '{negocio}':S.settings.nombreNegocio||''
+  };
+  let out=tpl; Object.entries(map).forEach(([k,v])=>out=out.split(k).join(v));
+  return out;
+}
+function avisadosSet(){try{const o=JSON.parse(localStorage.getItem(LS+'-avisados')||'null');
+  if(o&&o.date===todayStr())return new Set(o.keys);}catch(e){}return new Set();}
+function avisadosMark(key){const s=avisadosSet();s.add(key);
+  localStorage.setItem(LS+'-avisados',JSON.stringify({date:todayStr(),keys:[...s]}));}
+let recFilter='hoy';
+function formRecordatorios(){
+  const tipos=[['hoy','Vencen hoy'],['manana','Vencen mañana'],['vencido','Vencidos']];
+  const lista=recLista(recFilter), avis=avisadosSet();
+  modal(`<h3>🔔 Recordatorios</h3>
+  <div class="hint">Tocá "Avisar" y se abre WhatsApp con el mensaje listo. Los mensajes se editan en Ajustes › Recordatorios.</div>
+  <div class="chips" style="margin-top:12px">
+    ${tipos.map(([k,t])=>`<button class="${recFilter===k?'on':''}" data-rf="${k}">${t} (${recLista(k).length})</button>`).join('')}
+  </div>
+  <div class="list">${lista.length?lista.map(({l,c})=>{
+    const cl=client(l.clientId)||{nombre:'?'}, tel=(cl.telefono||'').replace(/\D/g,'');
+    const key=l.id+'|'+c.n, ya=avis.has(key), total=cRestante(c)+moraDe(c)+cobradorDe(c);
+    return `<div class="item" style="cursor:default">
+      <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
+      <div class="mid"><div class="t1">${esc(cl.nombre)} ${ya?'<span class="badge b-ok">✓ avisado</span>':''}</div>
+        <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${fmt$(total)}${recFilter==='vencido'?' · vencía '+dShort(c.vence):''}</div></div>
+      ${tel?`<button class="btn green mini" data-avisar="${key}">Avisar</button>`:'<span class="t2" style="flex-shrink:0">sin tel.</span>'}
+    </div>`;}).join(''):'<div class="empty">No hay clientes en esta lista 🎉</div>'}</div>`);
+  $$('[data-rf]').forEach(b=>b.onclick=()=>{recFilter=b.dataset.rf;formRecordatorios();});
+  $$('[data-avisar]').forEach(b=>b.onclick=()=>{
+    const[id,n]=b.dataset.avisar.split('|'); const l=loan(id); const c=l&&l.cuotas.find(x=>x.n===+n);
+    if(!l||!c)return; const cl=client(l.clientId)||{};
+    waOpen(cl.telefono,recMsg(recFilter,l,c));
+    avisadosMark(b.dataset.avisar); formRecordatorios();
+  });
 }
 
 /* ----- PDF nativo del contrato (jsPDF local, sin CDN) ----- */
@@ -1078,7 +1145,7 @@ function balanceMes(y,m){
       }}));});
   let prestado=0,nNuevos=0;
   S.loans.forEach(l=>{if(!l.createdAt)return;const d=new Date(l.createdAt);
-    if(d.getFullYear()===y&&d.getMonth()===m){prestado+=l.monto||0;nNuevos++;}});
+    if(d.getFullYear()===y&&d.getMonth()===m){prestado+=Math.max(0,(l.monto||0)-(l.refinanciado||0));nNuevos++;}});
   return {cobrado,baseC,moraC,cobC,gananciaC:Math.round(gananciaC),nCobros,prestado,nNuevos,miG:Math.round(miG),socG};
 }
 function vCalendario(){
@@ -1175,6 +1242,15 @@ function vAjustes(){
     <input id="set-cobmonto" type="number" inputmode="decimal" value="${st.cobrador.monto}">
     <label>Se aplica después de (días de mora)</label>
     <input id="set-cobdias" type="number" inputmode="numeric" value="${st.cobrador.dias}">
+  </div>
+  <h2>🔔 Recordatorios (mensajes)</h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <div class="hint" style="margin-top:10px">Mensajes que se envían desde el botón "Recordatorios" del Inicio. Podés usar estas etiquetas, que se reemplazan solas:<br>
+    <code>{nombre}</code> <code>{cuota}</code> <code>{monto}</code> <code>{mora}</code> <code>{total}</code> <code>{fecha}</code> <code>{alias}</code> <code>{hora}</code> <code>{negocio}</code></div>
+    <label>Vence hoy</label><textarea id="set-rec-hoy">${esc(st.recordatorios.hoy)}</textarea>
+    <label>Vence mañana</label><textarea id="set-rec-manana">${esc(st.recordatorios.manana)}</textarea>
+    <label>Vencido</label><textarea id="set-rec-vencido">${esc(st.recordatorios.vencido)}</textarea>
+    <button class="btn sec mini" id="set-rec-reset" style="margin-top:10px">↩️ Restaurar mensajes por defecto</button>
   </div>
   <button class="btn" id="set-save" style="margin-top:14px">💾 Guardar ajustes</button>
 
@@ -1402,6 +1478,72 @@ function formPrestamo(clientId){
       l.gestorId=sid; l.gestorPct=sp; l.gestorNombre=socioNombre(sid);
     }
     saveLoan(l);closeModal();go('prestamos',l.id);
+  };
+}
+
+function formRenovar(viejoId){
+  const v=loan(viejoId); if(!v)return;
+  const cl=client(v.clientId)||{nombre:'?'};
+  const saldo=loanRestante(v);
+  const inicioDef=fechaPrimerCobro('diaria');
+  modal(`<h3>🔄 Renovar préstamo</h3>
+  <div class="hint">Cliente: <b>${esc(cl.nombre)}</b> · Saldo pendiente actual: <b>${fmt$(saldo)}</b></div>
+  <div class="frow">
+    <div><label>Monto del nuevo préstamo *</label><input id="rv-monto" type="number" inputmode="decimal" placeholder="100000"></div>
+    <div><label>Interés % *</label><input id="rv-int" type="number" inputmode="decimal" placeholder="30"></div>
+  </div>
+  <div class="frow">
+    <div><label>Frecuencia</label><select id="rv-freq">
+      <option value="diaria">Diaria</option><option value="semanal">Semanal</option><option value="quincenal">Quincenal</option></select></div>
+    <div><label>Cant. de cuotas *</label><input id="rv-n" type="number" inputmode="numeric" placeholder="30"></div>
+  </div>
+  <div class="frow">
+    <div><label>Primer cobro</label><input id="rv-inicio" type="date" value="${inicioDef}"></div>
+    <div id="rv-sundiv"><label>Domingos</label><div class="seg" id="rv-sun">
+      <button data-v="1" class="on">Saltar</button><button data-v="0">Cobrar</button></div></div>
+  </div>
+  <label>¿Qué hago con el préstamo actual?</label>
+  <div class="seg" id="rv-saldar">
+    <button data-v="1" class="on">Saldarlo con la renovación</button>
+    <button data-v="0">Dejarlo aparte</button>
+  </div>
+  <div class="resume" id="rv-resume">Completá monto y cuotas para ver el resumen.</div>
+  <button class="btn" id="rv-save" style="margin-top:16px">🔄 Confirmar renovación</button>`);
+  let skipSun=true, saldar=true;
+  $$('#rv-sun button').forEach(b=>b.onclick=()=>{skipSun=b.dataset.v==='1';
+    $$('#rv-sun button').forEach(x=>x.classList.toggle('on',x===b));});
+  $$('#rv-saldar button').forEach(b=>b.onclick=()=>{saldar=b.dataset.v==='1';
+    $$('#rv-saldar button').forEach(x=>x.classList.toggle('on',x===b));upd();});
+  const upd=()=>{
+    const mm=+$('#rv-monto').value||0,i=+$('#rv-int').value||0,n=+$('#rv-n').value||0,f=$('#rv-freq').value;
+    $('#rv-sundiv').style.display=f==='diaria'?'':'none';
+    if(!mm||!n){$('#rv-resume').textContent='Completá monto y cuotas para ver el resumen.';return;}
+    const total=Math.round(mm*(1+i/100));
+    const cs=genCuotas(total,n,f,$('#rv-inicio').value||inicioDef,f==='diaria'&&skipSun);
+    const refin=saldar?saldo:0, enMano=mm-refin;
+    $('#rv-resume').innerHTML=`Total a devolver del nuevo: <b>${fmt$(total)}</b> · ganancia ${fmt$(total-mm)}<br>`
+      +`${n} cuotas ${{diaria:'diarias',semanal:'semanales',quincenal:'quincenales'}[f]} de <b>${fmt$(cs[0].monto)}</b><br>`
+      +(saldar?`Se salda el préstamo actual (${fmt$(saldo)}).<br><span style="color:var(--gold)">Plata nueva en mano para el cliente: <b>${fmt$(enMano)}</b></span>`
+              :`El préstamo actual queda activo aparte.`)
+      +(enMano<0?`<br><span style="color:var(--red)">⚠️ El monto nuevo es menor que el saldo. Revisalo.</span>`:'');
+  };
+  ['rv-monto','rv-int','rv-n','rv-freq','rv-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
+  $('#rv-save').onclick=()=>{
+    const mm=+$('#rv-monto').value,i=+$('#rv-int').value||0,n=+$('#rv-n').value,f=$('#rv-freq').value,ini=$('#rv-inicio').value;
+    if(!mm||mm<=0)return alert('Poné el monto del nuevo préstamo');
+    if(!n||n<1)return alert('Poné la cantidad de cuotas');
+    if(!ini)return alert('Elegí la fecha del primer cobro');
+    const refin=saldar?saldo:0;
+    if(saldar&&mm<saldo&&!confirm('El monto nuevo ('+fmt$(mm)+') es menor que el saldo pendiente ('+fmt$(saldo)+'). El cliente no recibiría plata. ¿Continuar igual?'))return;
+    const total=Math.round(mm*(1+i/100));
+    const nuevo={id:uid(),clientId:v.clientId,tipo:v.tipo,monto:mm,interes:i,total,
+      frecuencia:f,inicio:ini,cuotas:genCuotas(total,n,f,ini,f==='diaria'&&skipSun),
+      status:'activo',createdAt:Date.now(),renovadoDe:v.id,refinanciado:refin};
+    // hereda el reparto del préstamo anterior
+    if(v.gestorId&&v.gestorPct){nuevo.gestorId=v.gestorId;nuevo.gestorPct=v.gestorPct;nuevo.gestorNombre=v.gestorNombre||socioNombre(v.gestorId);}
+    saveLoan(nuevo);
+    if(saldar){v.status='renovado';v.renovadoEn=nuevo.id;touch(v);persist();fbPush('loan',v);}
+    closeModal();go('prestamos',nuevo.id);
   };
 }
 
@@ -1717,6 +1859,7 @@ function bindView(){
   $$('[data-loan]').forEach(b=>b.onclick=()=>go('prestamos',b.dataset.loan));
   $$('[data-rep]').forEach(b=>b.onclick=()=>{const k=b.dataset.rep;
     repartoOpen.has(k)?repartoOpen.delete(k):repartoOpen.add(k);render();});
+  {const rb=$('#rec-btn');if(rb)rb.onclick=()=>{recFilter='hoy';formRecordatorios();};}
   $$('[data-cobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
   $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
@@ -1743,6 +1886,7 @@ function bindView(){
     delEntity('client',c);go('clientes');});
   $$('[data-contrato]').forEach(b=>b.onclick=()=>generarContrato(b.dataset.contrato));
   $$('[data-tyc]').forEach(b=>b.onclick=()=>enviarTyC(b.dataset.tyc));
+  $$('[data-renovar]').forEach(b=>b.onclick=()=>formRenovar(b.dataset.renovar));
   $$('[data-fb]').forEach(b=>b.onclick=()=>window.open(b.dataset.fb,'_blank'));
   $$('[data-del-loan]').forEach(b=>b.onclick=()=>{
     const l=loan(b.dataset.delLoan);if(!l)return;
@@ -1774,7 +1918,13 @@ function bindView(){
       S.settings.mora={tipo:moratipo,valor:+$('#set-moraval').value||0,porDia};
       S.settings.horaLimite=+$('#set-hora').value;
       S.settings.cobrador={monto:+$('#set-cobmonto').value||0,dias:+$('#set-cobdias').value||3};
+      S.settings.recordatorios={
+        hoy:$('#set-rec-hoy').value.trim()||DEF_REC.hoy,
+        manana:$('#set-rec-manana').value.trim()||DEF_REC.manana,
+        vencido:$('#set-rec-vencido').value.trim()||DEF_REC.vencido};
       saveSettings();render();alert('Ajustes guardados ✅');};
+    const rr=$('#set-rec-reset');if(rr)rr.onclick=()=>{
+      $('#set-rec-hoy').value=DEF_REC.hoy;$('#set-rec-manana').value=DEF_REC.manana;$('#set-rec-vencido').value=DEF_REC.vencido;};
     const sa=$('#socio-add');if(sa){sa.onclick=()=>{
       const nom=$('#socio-nombre').value.trim();
       if(!nom)return alert('Escribí el nombre del socio');
