@@ -64,6 +64,9 @@
   .item .m1{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
   .item .m2{font-size:11px;color:var(--muted);margin-top:2px}
   .chev{font-size:11px;color:var(--muted);margin-left:2px}
+  .balgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:12px}
+  .balgrid .bn{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
+  .balgrid .bl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.3px}
   .rephdr:active{background:var(--panel-2)}
   .repbox{background:var(--panel-2);border-bottom:1px solid var(--line)}
   .repsub{display:flex;align-items:center;gap:12px;padding:11px 14px 11px 24px;border-top:1px solid var(--line);cursor:pointer}
@@ -1062,6 +1065,22 @@ function armarContrato(id,tipo){
 }
 
 /* ================= VISTA: CALENDARIO ================= */
+function balanceMes(y,m){
+  let cobrado=0,baseC=0,moraC=0,cobC=0,gananciaC=0,nCobros=0,miG=0;const socG={};
+  S.loans.forEach(l=>{
+    const fracG=l.total?loanGanancia(l)/l.total:0, r=loanReparto(l);
+    l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{const d=new Date(p.t);
+      if(d.getFullYear()===y&&d.getMonth()===m){
+        const base=p.monto||0,mo=p.mora||0,co=p.cobrador||0,prof=base*fracG+mo+co;
+        cobrado+=base+mo+co;baseC+=base;moraC+=mo;cobC+=co;gananciaC+=prof;nCobros++;
+        if(r.compartido){miG+=prof*r.miPct/100;socG[r.socioNom]=(socG[r.socioNom]||0)+prof*r.socioPct/100;}
+        else miG+=prof;
+      }}));});
+  let prestado=0,nNuevos=0;
+  S.loans.forEach(l=>{if(!l.createdAt)return;const d=new Date(l.createdAt);
+    if(d.getFullYear()===y&&d.getMonth()===m){prestado+=l.monto||0;nNuevos++;}});
+  return {cobrado,baseC,moraC,cobC,gananciaC:Math.round(gananciaC),nCobros,prestado,nNuevos,miG:Math.round(miG),socG};
+}
 function vCalendario(){
   const y=calRef.getFullYear(),m=calRef.getMonth();
   const first=new Date(y,m,1),start=(first.getDay()+6)%7; // lunes=0
@@ -1084,12 +1103,29 @@ function vCalendario(){
       <span>${d}</span>${cob.length?`<span class="amt">${fmt$(tot)}</span>`:''}<span class="dots">${dots}</span></div>`;
   }
   const sel=cobrosDelDia(calSel);
+  const mesNom=calRef.toLocaleDateString('es-AR',{month:'long',year:'numeric'});
+  const mesCap=mesNom.charAt(0).toUpperCase()+mesNom.slice(1);
+  const b=balanceMes(y,m);
+  const socLine=Object.keys(b.socG).length?`<div class="t2" style="margin-top:6px">Reparto de la ganancia: <b style="color:var(--green)">${fmt$(b.miG)}</b> para vos`
+    +Object.entries(b.socG).map(([n,v])=>` · <b style="color:var(--blue)">${fmt$(Math.round(v))}</b> ${esc(n)}`).join('')+'</div>':'';
+  const balHTML=`<div class="list" style="padding:14px;margin-bottom:14px">
+    <div class="t1" style="font-size:15px;margin-bottom:10px">📊 Balance de ${mesCap}</div>
+    <div class="balgrid">
+      <div><div class="bn" style="color:var(--green)">${fmt$(b.cobrado)}</div><div class="bl">cobrado · ${b.nCobros} cobro${b.nCobros===1?'':'s'}</div></div>
+      <div><div class="bn" style="color:var(--gold)">${fmt$(b.gananciaC)}</div><div class="bl">ganancia cobrada</div></div>
+      <div><div class="bn">${fmt$(b.prestado)}</div><div class="bl">prestado · ${b.nNuevos} nuevo${b.nNuevos===1?'':'s'}</div></div>
+    </div>
+    ${b.cobrado>0?`<div class="t2" style="margin-top:8px">Desglose cobrado: cuotas ${fmt$(b.baseC)} · mora ${fmt$(b.moraC)} · cobrador ${fmt$(b.cobC)}</div>`:''}
+    ${socLine}
+    ${b.cobrado===0&&b.prestado===0?'<div class="t2" style="margin-top:8px;font-style:italic">Sin movimientos en este mes.</div>':''}
+  </div>`;
   return `
   <div class="calhead">
     <button data-cal="-1">‹</button>
-    <div class="mname">${calRef.toLocaleDateString('es-AR',{month:'long',year:'numeric'})}</div>
+    <div class="mname">${mesNom}</div>
     <button data-cal="1">›</button>
   </div>
+  ${balHTML}
   <div class="dow">${['lu','ma','mi','ju','vi','sá','do'].map(d=>'<span>'+d+'</span>').join('')}</div>
   <div class="cgrid">${cells}</div>
   <h2>Cobros del ${dLong(calSel)} <span class="cnt">${sel.length}</span></h2>
