@@ -679,7 +679,7 @@ function vPrestamo(id){
     <div class="stat blue"><div class="lbl">Capital + interés</div><div class="val" style="font-size:17px">${fmt$(l.monto)} + ${l.interes}%</div>
       <div class="ex">total ${fmt$(l.total)}</div></div>
     <div class="stat ${restante>0?'orange':'green'}"><div class="lbl">Restante</div><div class="val" style="font-size:17px">${fmt$(restante)}</div>
-      <div class="ex">${l.status==='pagado'?'¡préstamo saldado!':l.cuotas.length+' cuotas de '+fmt$(l.cuotas[0].monto)}</div></div>
+      <div class="ex">${l.status==='pagado'?'¡préstamo saldado!':(()=>{const p=loanCuotasPend(l).length;return p+' cuota'+(p===1?'':'s')+' pendiente'+(p===1?'':'s')+' de '+fmt$(l.cuotas[0].monto);})()}</div></div>
     <div class="stat ${moraTot>0?'red':'green'}"><div class="lbl">Mora acumulada</div><div class="val" style="font-size:17px">${fmt$(moraTot)}</div></div>
   </div>
   ${(()=>{const r=loanReparto(l);
