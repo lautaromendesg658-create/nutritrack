@@ -64,6 +64,7 @@
   .item .m1{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
   .item .m2{font-size:11px;color:var(--muted);margin-top:2px}
   .chev{font-size:11px;color:var(--muted);margin-left:2px}
+  .clip{color:var(--blue);cursor:pointer;font-weight:600}
   .balgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:12px}
   .balgrid .bn{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
   .balgrid .bl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.3px}
@@ -565,7 +566,10 @@ function vInicio(){
     <div class="stat red"><div class="lbl">Vencidos</div><div class="val">${fmt$(vencMonto)}</div><div class="ex">${venc.length} cuota${venc.length===1?'':'s'} con mora</div></div>
     <div class="stat green"><div class="lbl">Interés en juego</div><div class="val">${fmt$(interes)}</div><div class="ex">ganancia de préstamos activos</div></div>
   </div>
-  <button class="btn" id="rec-btn" style="background:#25D366;color:#fff;margin-top:4px">🔔 Recordatorios · ${recLista('hoy').length} hoy · ${recLista('vencido').length} vencidos</button>
+  <div class="btnrow" style="margin-top:4px">
+    <button class="btn" id="rec-btn" style="background:#25D366;color:#fff;flex:2">🔔 Recordatorios · ${recLista('hoy').length} hoy · ${recLista('vencido').length} vencidos</button>
+    <button class="btn sec" id="alias-btn" style="flex:1">📋 Alias</button>
+  </div>
   ${repartoHTML}
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
@@ -708,7 +712,8 @@ function vPrestamo(id){
     const badge=est==='pagada'?'<span class="badge b-ok">Pagada</span>'
       :est==='vencida'?`<span class="badge b-ven">${diasAtraso(c)}d mora</span>${cob>0?'<span class="badge b-cob">cobrador</span>':''}`
       :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>';
-    const pagosTxt=(c.pagos||[]).map(p=>fmt$((p.monto||0)+(p.mora||0)+(p.cobrador||0))+' el '+new Date(p.t).toLocaleDateString('es-AR',{day:'numeric',month:'short'})).join(', ');
+    const pagosTxt=(c.pagos||[]).map(p=>fmt$((p.monto||0)+(p.mora||0)+(p.cobrador||0))+' el '+new Date(p.t).toLocaleDateString('es-AR',{day:'numeric',month:'short'})
+      +(p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` <span class="clip" data-doc="${p.comprobante}">📎 comprobante</span>`:'')).join(', ');
     return `<div class="cuota ${cls}">
       <div class="num">${c.n}</div>
       <div class="mid" style="flex:1;min-width:0">
@@ -743,6 +748,14 @@ function waOpen(tel,texto){ // abre WhatsApp con el número del cliente y el tex
   const d=(tel||'').replace(/\D/g,'');
   if(!d){alert('Este cliente no tiene teléfono cargado. Agregalo en la ficha del cliente (con código de país, ej: 549351...).');return;}
   window.open('https://wa.me/'+d+'?text='+encodeURIComponent(texto),'_blank');
+}
+function copiarAlias(btn){ // copia el alias de cobro al portapapeles
+  const a=(S.settings.alias||'').trim();
+  if(!a)return alert('No tenés alias cargado. Agregalo en Ajustes → Negocio.');
+  const ok=()=>{if(btn){const t=btn.textContent;btn.textContent='✓ Copiado';setTimeout(()=>{btn.textContent=t;},1500);}};
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(a).then(ok).catch(()=>prompt('Copiá el alias:',a));
+  else prompt('Copiá el alias:',a);
 }
 function periodoPlural(freq,n){
   if(freq==='diaria')return n===1?'día':'días';
@@ -1663,15 +1676,34 @@ function formCobro(loanId,nCuota){
   <label>Cargo de cobrador ${cob>0?'(automático: +'+(S.settings.cobrador.dias||3)+' días de mora)':''}</label>
   <input id="co-cob" type="number" inputmode="decimal" value="${cob}">
   <div class="resume">Total a cobrar: <b id="co-total">${fmt$(rest+mora+cob)}</b></div>
+  <label>Comprobante de transferencia (opcional)</label>
+  <input type="file" id="co-file" accept="image/*" style="display:none">
+  <div class="btnrow" style="margin-top:0">
+    <button class="btn sec" id="co-adj">📎 Adjuntar comprobante</button>
+    <button class="btn sec" id="co-alias">📋 Copiar alias</button>
+  </div>
   <button class="btn green" id="co-save" style="margin-top:16px">✅ Registrar cobro</button>`);
   const upd=()=>{$('#co-total').textContent=fmt$((+$('#co-base').value||0)+(+$('#co-mora').value||0)+(+$('#co-cob').value||0));};
   ['co-base','co-mora','co-cob'].forEach(x=>$('#'+x).oninput=upd);
   const cond=$('#co-condonar');if(cond)cond.onclick=()=>{$('#co-mora').value=0;upd();};
-  $('#co-save').onclick=()=>{
+  let coFile=null;
+  $('#co-adj').onclick=()=>$('#co-file').click();
+  $('#co-file').onchange=e=>{coFile=e.target.files[0]||null;
+    $('#co-adj').textContent=coFile?'📎 ✓ '+(coFile.name.length>18?coFile.name.slice(0,18)+'…':coFile.name):'📎 Adjuntar comprobante';};
+  $('#co-alias').onclick=e=>copiarAlias(e.currentTarget);
+  $('#co-save').onclick=async()=>{
     const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
     if(base+m+cb<=0)return alert('El monto debe ser mayor a 0');
     if(base>rest&&!confirm('Estás cobrando más que lo que resta de la cuota. ¿Continuar?'))return;
-    c.pagos=c.pagos||[];c.pagos.push({t:Date.now(),monto:base,mora:m,cobrador:cb});
+    const pago={t:Date.now(),monto:base,mora:m,cobrador:cb};
+    if(coFile){
+      const data=await compressImage(coFile);
+      if(data){
+        const d={id:uid(),clientId:l.clientId,nombre:'Comprobante cuota '+c.n+'/'+l.cuotas.length+' · '+dShort(todayStr()),tipo:'image/jpeg',data,createdAt:Date.now()};
+        saveDoc(d);pago.comprobante=d.id;
+      }else alert('No se pudo procesar la imagen del comprobante. El cobro se registra igual.');
+    }
+    c.pagos=c.pagos||[];c.pagos.push(pago);
     saveLoan(l);closeModal();render();
     const tel=(cl.telefono||'').replace(/\D/g,'');
     if(tel&&confirm('Cobro registrado ✅\n¿Enviar comprobante por WhatsApp?')){
@@ -1859,7 +1891,8 @@ function bindView(){
   $$('[data-loan]').forEach(b=>b.onclick=()=>go('prestamos',b.dataset.loan));
   $$('[data-rep]').forEach(b=>b.onclick=()=>{const k=b.dataset.rep;
     repartoOpen.has(k)?repartoOpen.delete(k):repartoOpen.add(k);render();});
-  {const rb=$('#rec-btn');if(rb)rb.onclick=()=>{recFilter='hoy';formRecordatorios();};}
+  {const rb=$('#rec-btn');if(rb)rb.onclick=()=>{recFilter='hoy';formRecordatorios();};
+   const ab=$('#alias-btn');if(ab)ab.onclick=()=>copiarAlias(ab);}
   $$('[data-cobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
   $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
