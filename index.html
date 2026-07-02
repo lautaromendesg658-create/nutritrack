@@ -1676,7 +1676,7 @@ function formCobro(loanId,nCuota){
   <label>Cargo de cobrador ${cob>0?'(automático: +'+(S.settings.cobrador.dias||3)+' días de mora)':''}</label>
   <input id="co-cob" type="number" inputmode="decimal" value="${cob}">
   <div class="resume">Total a cobrar: <b id="co-total">${fmt$(rest+mora+cob)}</b></div>
-  <label>Comprobante de transferencia (opcional)</label>
+  <label>Comprobante de transferencia (opcional · en PC podés pegarlo con Ctrl+V)</label>
   <input type="file" id="co-file" accept="image/*" style="display:none">
   <div class="btnrow" style="margin-top:0">
     <button class="btn sec" id="co-adj">📎 Adjuntar comprobante</button>
@@ -1690,6 +1690,7 @@ function formCobro(loanId,nCuota){
   $('#co-adj').onclick=()=>$('#co-file').click();
   $('#co-file').onchange=e=>{coFile=e.target.files[0]||null;
     $('#co-adj').textContent=coFile?'📎 ✓ '+(coFile.name.length>18?coFile.name.slice(0,18)+'…':coFile.name):'📎 Adjuntar comprobante';};
+  window.__coPaste=f=>{coFile=f;const b=$('#co-adj');if(b)b.textContent='📎 ✓ Imagen pegada';};
   $('#co-alias').onclick=e=>copiarAlias(e.currentTarget);
   $('#co-save').onclick=async()=>{
     const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
@@ -1854,6 +1855,18 @@ function formCambiarClave(){
     await setAuth(u,p);closeModal();alert('Acceso actualizado ✅');
   };
 }
+// pegar imagen del portapapeles (Ctrl+V) como comprobante, con el modal de cobro abierto
+document.addEventListener('paste',e=>{
+  if(!$('#co-adj')||!window.__coPaste)return;
+  const items=(e.clipboardData&&e.clipboardData.items)||[];
+  for(const it of items){
+    if(it.type&&it.type.startsWith('image/')){
+      const f=it.getAsFile&&it.getAsFile();
+      if(f){e.preventDefault();window.__coPaste(f);break;}
+    }
+  }
+});
+
 // re-bloquear si la app queda en segundo plano más de 5 minutos
 let hiddenAt=0;
 document.addEventListener('visibilitychange',()=>{
