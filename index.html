@@ -273,8 +273,40 @@ try{const raw=localStorage.getItem(LS); if(raw){const p=JSON.parse(raw);
      recordatorios:{...DEF_REC,...(p.settings&&p.settings.recordatorios||{})}},
     clients:p.clients||[], loans:p.loans||[], docs:p.docs||[]};}}catch(e){}
 
-function persist(){try{localStorage.setItem(LS,JSON.stringify(S));}catch(e){
-  if((e+'').includes('uota'))alert('Atención: el almacenamiento local está lleno. Borrá documentos viejos o activá la sincronización.');}}
+// Los documentos (imágenes) viven en IndexedDB, que tiene mucho más espacio que
+// localStorage (iPhone limita localStorage a ~5MB). En localStorage queda solo lo liviano.
+function persist(){try{
+  localStorage.setItem(LS,JSON.stringify({settings:S.settings,clients:S.clients,loans:S.loans}));
+}catch(e){
+  if((e+'').includes('uota'))alert('Atención: el almacenamiento local está lleno. Cerrá y volvé a abrir la app para liberar espacio; si persiste, avisale a tu desarrollador.');}}
+
+/* ----- IndexedDB para documentos ----- */
+let _idb=null;
+function idb(){return _idb?Promise.resolve(_idb):new Promise((ok,err)=>{
+  const r=indexedDB.open('prestacontrol',1);
+  r.onupgradeneeded=()=>{r.result.createObjectStore('docs',{keyPath:'id'});};
+  r.onsuccess=()=>{_idb=r.result;ok(_idb);};
+  r.onerror=()=>err(r.error);});}
+function idbPut(d){return idb().then(db=>new Promise((ok,err)=>{
+  const t=db.transaction('docs','readwrite');t.objectStore('docs').put(d);
+  t.oncomplete=ok;t.onerror=()=>err(t.error);})).catch(e=>console.error('idbPut',e));}
+function idbDel(id){return idb().then(db=>new Promise((ok,err)=>{
+  const t=db.transaction('docs','readwrite');t.objectStore('docs').delete(id);
+  t.oncomplete=ok;t.onerror=()=>err(t.error);})).catch(e=>console.error('idbDel',e));}
+function idbAll(){return idb().then(db=>new Promise((ok,err)=>{
+  const rq=db.transaction('docs').objectStore('docs').getAll();
+  rq.onsuccess=()=>ok(rq.result||[]);rq.onerror=()=>err(rq.error);})).catch(()=>[]);}
+async function docsInit(){ // migra documentos viejos de localStorage a IndexedDB y carga todo
+  const enIdb=await idbAll(), map={};
+  enIdb.forEach(d=>map[d.id]=d);
+  (S.docs||[]).forEach(d=>{ // docs que venían en el blob viejo de localStorage o de sync temprano
+    if(!map[d.id]||(d.updatedAt||0)>(map[d.id].updatedAt||0)){map[d.id]=d;idbPut(d);}
+  });
+  S.docs=Object.values(map);
+  persist(); // reescribe localStorage sin las imágenes → libera el espacio lleno
+}
+let DOCS_READY=false;
+docsInit().catch(e=>console.error('docsInit',e)).finally(()=>{DOCS_READY=true;if(typeof UNLOCKED!=='undefined'&&UNLOCKED)render();});
 
 /* ================= UTILS ================= */
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -371,11 +403,13 @@ function saveClient(c){touch(c);const i=S.clients.findIndex(x=>x.id===c.id);
 function saveLoan(l){refreshLoanStatus(l);touch(l);const i=S.loans.findIndex(x=>x.id===l.id);
   if(i<0)S.loans.push(l);else S.loans[i]=l; persist(); fbPush('loan',l);}
 function saveDoc(d){touch(d);const i=S.docs.findIndex(x=>x.id===d.id);
-  if(i<0)S.docs.push(d);else S.docs[i]=d; persist(); fbPush('doc',d);}
+  if(i<0)S.docs.push(d);else S.docs[i]=d; idbPut(d); persist(); fbPush('doc',d);}
 function delEntity(kind,obj){ // tombstone para que la baja se propague a otros dispositivos
   touch(obj); obj.deleted=true; fbPush(kind,obj);
   const arr=kind==='client'?S.clients:kind==='loan'?S.loans:S.docs;
-  const i=arr.findIndex(x=>x.id===obj.id); if(i>=0)arr.splice(i,1); persist();
+  const i=arr.findIndex(x=>x.id===obj.id); if(i>=0)arr.splice(i,1);
+  if(kind==='doc')idbDel(obj.id);
+  persist();
 }
 function saveSettings(){touch(S.settings);persist();fbPushSettings();applyBiz();}
 
@@ -414,8 +448,10 @@ function fbConnect(){
           const i=arr.findIndex(x=>x.id===ent.id);
           const localUp=i>=0?(arr[i].updatedAt||0):-1;
           if((ent.updatedAt||0)>localUp){
-            if(ent.deleted){if(i>=0){arr.splice(i,1);changed=true;}}
-            else{if(i<0)arr.push(ent);else arr[i]=ent;changed=true;}
+            if(ent.deleted){if(i>=0){arr.splice(i,1);changed=true;}
+              if(d.kind==='doc')idbDel(ent.id);}
+            else{if(i<0)arr.push(ent);else arr[i]=ent;changed=true;
+              if(d.kind==='doc')idbPut(ent);}
           }
         });
         if(changed){persist();render();}
@@ -1834,7 +1870,9 @@ function showLock(){
     $('#lk-user').focus();
     $('#lk-forgot').onclick=()=>{
       const r=prompt('Sin la contraseña no se puede entrar. La única opción es BORRAR los datos de este dispositivo y empezar de nuevo (si tenés sincronización activa, recuperás todo reconectándola).\n\nEscribí BORRAR para confirmar:');
-      if(r==='BORRAR'){localStorage.removeItem(LS);localStorage.removeItem(AUTH_KEY);localStorage.removeItem(LS+'-fb');location.reload();}
+      if(r==='BORRAR'){localStorage.removeItem(LS);localStorage.removeItem(AUTH_KEY);localStorage.removeItem(LS+'-fb');
+        try{if(_idb)_idb.close();indexedDB.deleteDatabase('prestacontrol');}catch(e){}
+        location.reload();}
     };
   }
 }
@@ -1890,6 +1928,7 @@ function importar(file){
       const tgt=k==='client'?S.clients:k==='loan'?S.loans:S.docs;
       const i=tgt.findIndex(x=>x.id===o.id);
       if(i<0)tgt.push(o);else if((o.updatedAt||0)>(tgt[i].updatedAt||0))tgt[i]=o;
+      if(k==='doc')idbPut(o);
       fbPush(k,o);
     }));
     persist();render();alert('Importado ✅');
@@ -2002,7 +2041,9 @@ function bindView(){
     $('#wipe').onclick=()=>{
       if(!confirm('⚠️ Se borrarán TODOS los datos guardados en este dispositivo. ¿Continuar?'))return;
       if(!confirm('¿Seguro? Esta acción no se puede deshacer (si tenés sincronización, los datos siguen en la nube).'))return;
-      localStorage.removeItem(LS);location.reload();};
+      localStorage.removeItem(LS);
+      try{if(_idb)_idb.close();indexedDB.deleteDatabase('prestacontrol');}catch(e){}
+      location.reload();};
   }
 }
 
