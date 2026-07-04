@@ -251,6 +251,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
+const APP_VER=27; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1370,7 +1371,8 @@ service cloud.firestore {
   </div>
   <h2>⚠️ Zona de peligro</h2>
   <button class="btn red" id="wipe">Borrar todos los datos de este dispositivo</button>
-  <div class="hint" style="text-align:center;margin-top:18px">PrestaControl · hecho a medida ✨</div>`;
+  <button class="btn sec" id="buscar-upd" style="margin-top:14px">🔁 Buscar actualización</button>
+  <div class="hint" style="text-align:center;margin-top:18px">PrestaControl · versión ${APP_VER} · hecho a medida ✨</div>`;
 }
 
 /* ================= FORMULARIOS / MODALES ================= */
@@ -2044,6 +2046,19 @@ function bindView(){
       localStorage.removeItem(LS);
       try{if(_idb)_idb.close();indexedDB.deleteDatabase('prestacontrol');}catch(e){}
       location.reload();};
+    const bu=$('#buscar-upd');if(bu)bu.onclick=async()=>{
+      if(!('serviceWorker' in navigator))return alert('No disponible en este navegador.');
+      const reg=await navigator.serviceWorker.getRegistration();
+      if(!reg)return alert('Recargá la página e intentá de nuevo.');
+      bu.textContent='⏳ Buscando…';bu.disabled=true;
+      let nueva=false;
+      reg.addEventListener('updatefound',()=>{nueva=true;});
+      try{await reg.update();}catch(e){}
+      setTimeout(()=>{
+        if(nueva||reg.waiting){alert('¡Hay una versión nueva! La app se va a recargar para instalarla.');location.reload();}
+        else{alert('Ya estás en la última versión (v'+APP_VER+') ✅');bu.textContent='🔁 Buscar actualización';bu.disabled=false;}
+      },1500);
+    };
   }
 }
 
