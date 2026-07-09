@@ -251,7 +251,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=29; // mantener a la par del número de caché en sw.js
+const APP_VER=30; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -265,13 +265,17 @@ const DEF_SETTINGS={
   recordatorios:{...DEF_REC},
   updatedAt:0
 };
+// completa cualquier campo faltante en los ajustes (p. ej. si vienen de una versión vieja o de la nube)
+function normSettings(st){st=st||{};
+  return {...DEF_SETTINGS,...st,
+    mora:{...DEF_SETTINGS.mora,...(st.mora||{})},
+    cobrador:{...DEF_SETTINGS.cobrador,...(st.cobrador||{})},
+    socios:st.socios||[],
+    recordatorios:{...DEF_REC,...(st.recordatorios||{})}};
+}
 let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[]};
 try{const raw=localStorage.getItem(LS); if(raw){const p=JSON.parse(raw);
-  S={settings:{...DEF_SETTINGS,...p.settings,
-     mora:{...DEF_SETTINGS.mora,...(p.settings&&p.settings.mora||{})},
-     cobrador:{...DEF_SETTINGS.cobrador,...(p.settings&&p.settings.cobrador||{})},
-     socios:(p.settings&&p.settings.socios)||[],
-     recordatorios:{...DEF_REC,...(p.settings&&p.settings.recordatorios||{})}},
+  S={settings:normSettings(p.settings),
     clients:p.clients||[], loans:p.loans||[], docs:p.docs||[]};}}catch(e){}
 
 // Los documentos (imágenes) viven en IndexedDB, que tiene mucho más espacio que
@@ -318,7 +322,7 @@ function fmt$(n){n=Math.round(n||0);return S.settings.moneda+' '+n.toLocaleStrin
 function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 const todayStr=()=>ymd(new Date());
 function pd(s){const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d,12,0,0);}
-function dueAt(s){const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d,S.settings.horaLimite||18,0,0);}
+function dueAt(s){const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d,S.settings.horaLimite??18,0,0);}
 function dShort(s){const d=pd(s);return d.toLocaleDateString('es-AR',{day:'numeric',month:'short'});}
 function dLong(s){const d=pd(s);return d.toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});}
 const client=id=>S.clients.find(c=>c.id===id);
@@ -466,7 +470,7 @@ function fbConnect(){
       FB.unsubs.push(FB.base.collection('meta').doc('settings').onSnapshot(doc=>{
         const d=doc.data(); if(!d||!d.json)return;
         let st;try{st=JSON.parse(d.json);}catch(e){return;}
-        if((st.updatedAt||0)>(S.settings.updatedAt||0)){S.settings=st;persist();applyBiz();render();}
+        if((st.updatedAt||0)>(S.settings.updatedAt||0)){S.settings=normSettings(st);persist();applyBiz();render();}
       }));
       // subir lo local que falte (primera conexión)
       FB.base.collection('items').get().then(snap=>{
@@ -714,7 +718,7 @@ function vPrestamo(id){
   const l=loan(id); if(!l)return '<div class="empty">Préstamo no encontrado</div>';
   const cl=client(l.clientId)||{nombre:'?'};
   const restante=loanRestante(l);
-  const moraTot=l.cuotas.reduce((a,c)=>a+moraDe(c)+cobradorDe(c),0);
+  const moraTot=l.status==='activo'?l.cuotas.reduce((a,c)=>a+moraDe(c)+cobradorDe(c),0):0;
   return `
   <button class="back" data-go="prestamos">← Préstamos</button>
   ${l.renovadoDe&&loan(l.renovadoDe)?`<div class="list" style="padding:11px 14px;margin-bottom:12px"><div class="t2" data-loan="${l.renovadoDe}" style="cursor:pointer">🔄 Renovación de un préstamo anterior${l.refinanciado?` · se refinanció ${fmt$(l.refinanciado)}`:''} · <span style="color:var(--gold)">ver original ›</span></div></div>`:''}
@@ -751,9 +755,12 @@ function vPrestamo(id){
     </div>`;})()}
   <h2>🗓 Cuotas</h2>
   <div class="list">${l.cuotas.map(c=>{
-    const est=estadoCuota(c), rest=cRestante(c), mora=moraDe(c), cob=cobradorDe(c);
-    const cls=est==='pagada'?'pg':est==='vencida'?'vn':est==='hoy'?'hy':'';
+    const esRenov=l.status==='renovado';
+    const est=estadoCuota(c), rest=cRestante(c);
+    const mora=esRenov?0:moraDe(c), cob=esRenov?0:cobradorDe(c); // el saldo renovado pasó al préstamo nuevo: sin mora fantasma
+    const cls=est==='pagada'?'pg':(est==='vencida'&&!esRenov)?'vn':est==='hoy'?'hy':'';
     const badge=est==='pagada'?'<span class="badge b-ok">Pagada</span>'
+      :esRenov?'<span class="badge b-com">Renovada</span>'
       :est==='vencida'?`<span class="badge b-ven">${diasAtraso(c)}d mora</span>${cob>0?'<span class="badge b-cob">cobrador</span>':''}`
       :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>';
     const pagosTxt=(c.pagos||[]).map(p=>fmt$((p.monto||0)+(p.mora||0)+(p.cobrador||0))+' el '+new Date(p.t).toLocaleDateString('es-AR',{day:'numeric',month:'short'})
@@ -764,10 +771,10 @@ function vPrestamo(id){
         <div class="t1" style="font-size:14px">${dLong(c.vence)} ${badge}</div>
         <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${pagosTxt?'<br>💰 '+pagosTxt:''}</div>
       </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+      ${esRenov?'':`<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
         <button class="btn sec mini" data-fecha="${l.id}|${c.n}" title="Cambiar fecha">📅</button>
         ${rest>0?`<button class="btn green mini" data-cobrar="${l.id}|${c.n}">Cobrar</button>`:''}
-      </div>
+      </div>`}
     </div>`;}).join('')}</div>
   <div class="btnrow">
     <button class="btn" data-contrato="${id}" style="background:var(--blue);color:#fff">📄 Generar contrato</button>
@@ -834,7 +841,7 @@ function contratoTexto(l,tipo){
 }
 function tycTexto(l){
   const cob=S.settings.cobrador||{dias:3,monto:15000};
-  const hora=S.settings.horaLimite||18;
+  const hora=S.settings.horaLimite??18;
   const alias=(S.settings.alias||'').trim();
   const ult=l.cuotas[l.cuotas.length-1];
   return `*IMPORTANTE*\n`
@@ -873,7 +880,7 @@ function recMsg(tipo,l,c){
     '{nombre}':cl.nombre||'', '{cuota}':c.n+'/'+l.cuotas.length,
     '{monto}':fmt$(cRestante(c)), '{mora}':fmt$(moraDe(c)), '{total}':fmt$(total),
     '{fecha}':dLong(c.vence), '{alias}':S.settings.alias||'',
-    '{hora}':String(S.settings.horaLimite||18), '{negocio}':S.settings.nombreNegocio||''
+    '{hora}':String(S.settings.horaLimite??18), '{negocio}':S.settings.nombreNegocio||''
   };
   let out=tpl; Object.entries(map).forEach(([k,v])=>out=out.split(k).join(v));
   return out;
@@ -1285,7 +1292,7 @@ function vAjustes(){
       <button data-v="1" class="${st.mora.porDia?'on':''}">Por cada día de atraso</button>
     </div>
     <label>Hora límite de pago</label>
-    <select id="set-hora">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===(st.horaLimite||18)?'selected':''}>${String(h).padStart(2,'0')}:00 hs</option>`).join('')}</select>
+    <select id="set-hora">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===(st.horaLimite??18)?'selected':''}>${String(h).padStart(2,'0')}:00 hs</option>`).join('')}</select>
   </div>
   <h2>🏍 Cargo de cobrador</h2>
   <div class="list" style="padding:4px 14px 16px">
@@ -1837,6 +1844,8 @@ function unlockApp(){
 }
 function showLock(){
   UNLOCKED=false;sessionStorage.removeItem('pc-unlocked');
+  closeModal(); // que ningún modal quede visible sobre el login
+  $$('.cview').forEach(v=>v.remove()); // ni el visor de contratos (datos del cliente)
   const a=getAuth(),lk=$('#lock');
   lk.classList.add('show');
   if(!a){
