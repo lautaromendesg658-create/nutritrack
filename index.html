@@ -251,7 +251,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=28; // mantener a la par del número de caché en sw.js
+const APP_VER=29; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -363,10 +363,14 @@ function loanExtrasCobrados(l){ // mora + cobrador efectivamente cobrados (tambi
 function loanGananciaProyectada(l){ // interés + extras ya cobrados
   return loanGanancia(l)+loanExtrasCobrados(l);
 }
-function loanGananciaRealizada(l){ // interés cobrado (proporcional) + mora y cobrador cobrados
-  if(!l.total)return loanExtrasCobrados(l);
-  const cobrado=l.total-loanRestante(l);
-  return Math.round(loanGanancia(l)*cobrado/l.total)+loanExtrasCobrados(l);
+function loanTotalCobrado(l){ // todo lo cobrado del préstamo: cuotas + mora + cobrador
+  return (l.total-loanRestante(l))+loanExtrasCobrados(l);
+}
+function loanGananciaRealizada(l){ // recién es ganancia lo que se cobra por encima del capital prestado (punto neutro)
+  return Math.max(0, loanTotalCobrado(l)-(l.monto||0));
+}
+function loanFaltaParaNeutro(l){ // cuánto falta cobrar de este préstamo para recuperar el capital
+  return Math.max(0, (l.monto||0)-loanTotalCobrado(l));
 }
 function socioNombre(id){
   const s=(S.settings.socios||[]).find(x=>x.id===id);
@@ -576,6 +580,7 @@ function vInicio(){
   };
   const repartoHTML=haySocios?`
   <h2>🤝 Reparto de ganancias <span class="cnt">activos</span></h2>
+  <div class="hint" style="margin:-4px 0 10px">Lo "cobrado" recién cuenta como ganancia una vez recuperado el capital prestado de cada préstamo.</div>
   <div class="list">
     ${repRow('__yo__','YO','','Mi parte',miReal,miTotal,'var(--green)',misLoans)}
     ${Object.entries(porSocio).map(([nom,v])=>repRow('s:'+nom,ini(nom),'shop',nom,v.real,v.total,'var(--blue)',v.loans)).join('')}
@@ -729,9 +734,11 @@ function vPrestamo(id){
       <div class="t2" style="margin-bottom:10px">Esta ganancia es toda para vos. Si la gestiona un socio, podés repartirla.</div>
       <button class="btn mini" data-reparto="${id}">+ Compartir con un socio</button>
     </div>`;
+    const falta=loanFaltaParaNeutro(l);
     return `<h2>🤝 Reparto de ganancia</h2>
     <div class="list" style="padding:14px">
       <div class="t2" style="margin-bottom:10px">Ganancia del préstamo: <b style="color:var(--gold)">${fmt$(r.gananciaTotal)}</b><br><span style="font-size:11px">interés + mora y cobrador cobrados</span></div>
+      ${falta>0?`<div class="t2" style="margin-bottom:10px;color:var(--orange)">🔄 Todavía recuperando el capital prestado (${fmt$(l.monto)}). Faltan cobrar ${fmt$(falta)} para llegar al punto neutro; recién de ahí en más se reparte.</div>`:''}
       <div class="cuota" style="padding:10px 0"><div class="num">YO</div>
         <div class="mid"><div class="t1" style="font-size:14px">Mi parte (${r.miPct}%)</div>
         <div class="t2">cobrado hasta ahora: ${fmt$(r.miParteReal)}</div></div>
@@ -1182,21 +1189,18 @@ function armarContrato(id,tipo){
 }
 
 /* ================= VISTA: CALENDARIO ================= */
-function balanceMes(y,m){
-  let cobrado=0,baseC=0,moraC=0,cobC=0,gananciaC=0,nCobros=0,miG=0;const socG={};
+function balanceMes(y,m){ // vista simple de caja del mes: cuánto salió y cuánto entró
+  let cobrado=0,baseC=0,moraC=0,cobC=0,nCobros=0;
   S.loans.forEach(l=>{
-    const fracG=l.total?loanGanancia(l)/l.total:0, r=loanReparto(l);
     l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{const d=new Date(p.t);
       if(d.getFullYear()===y&&d.getMonth()===m){
-        const base=p.monto||0,mo=p.mora||0,co=p.cobrador||0,prof=base*fracG+mo+co;
-        cobrado+=base+mo+co;baseC+=base;moraC+=mo;cobC+=co;gananciaC+=prof;nCobros++;
-        if(r.compartido){miG+=prof*r.miPct/100;socG[r.socioNom]=(socG[r.socioNom]||0)+prof*r.socioPct/100;}
-        else miG+=prof;
+        const base=p.monto||0,mo=p.mora||0,co=p.cobrador||0;
+        cobrado+=base+mo+co;baseC+=base;moraC+=mo;cobC+=co;nCobros++;
       }}));});
   let prestado=0,nNuevos=0;
   S.loans.forEach(l=>{if(!l.createdAt)return;const d=new Date(l.createdAt);
     if(d.getFullYear()===y&&d.getMonth()===m){prestado+=Math.max(0,(l.monto||0)-(l.refinanciado||0));nNuevos++;}});
-  return {cobrado,baseC,moraC,cobC,gananciaC:Math.round(gananciaC),nCobros,prestado,nNuevos,miG:Math.round(miG),socG};
+  return {cobrado,baseC,moraC,cobC,nCobros,prestado,nNuevos,neto:cobrado-prestado};
 }
 function vCalendario(){
   const y=calRef.getFullYear(),m=calRef.getMonth();
@@ -1223,17 +1227,15 @@ function vCalendario(){
   const mesNom=calRef.toLocaleDateString('es-AR',{month:'long',year:'numeric'});
   const mesCap=mesNom.charAt(0).toUpperCase()+mesNom.slice(1);
   const b=balanceMes(y,m);
-  const socLine=Object.keys(b.socG).length?`<div class="t2" style="margin-top:6px">Reparto de la ganancia: <b style="color:var(--green)">${fmt$(b.miG)}</b> para vos`
-    +Object.entries(b.socG).map(([n,v])=>` · <b style="color:var(--blue)">${fmt$(Math.round(v))}</b> ${esc(n)}`).join('')+'</div>':'';
-  const balHTML=`<div class="list" style="padding:14px;margin-bottom:14px">
+  const netoColor=b.neto>=0?'var(--green)':'var(--red)';
+  const balHTML=`<div class="list" id="cal-balance" style="padding:14px;margin-bottom:14px">
     <div class="t1" style="font-size:15px;margin-bottom:10px">📊 Balance de ${mesCap}</div>
     <div class="balgrid">
-      <div><div class="bn" style="color:var(--green)">${fmt$(b.cobrado)}</div><div class="bl">cobrado · ${b.nCobros} cobro${b.nCobros===1?'':'s'}</div></div>
-      <div><div class="bn" style="color:var(--gold)">${fmt$(b.gananciaC)}</div><div class="bl">ganancia cobrada</div></div>
-      <div><div class="bn">${fmt$(b.prestado)}</div><div class="bl">prestado · ${b.nNuevos} nuevo${b.nNuevos===1?'':'s'}</div></div>
+      <div><div class="bn" style="color:var(--gold)">${fmt$(b.prestado)}</div><div class="bl">prestaste · ${b.nNuevos} nuevo${b.nNuevos===1?'':'s'}</div></div>
+      <div><div class="bn" style="color:var(--blue)">${fmt$(b.cobrado)}</div><div class="bl">cobraste · ${b.nCobros} cobro${b.nCobros===1?'':'s'}</div></div>
+      <div><div class="bn" style="color:${netoColor}">${b.neto<0?'-':''}${fmt$(Math.abs(b.neto))}</div><div class="bl">neto ganado</div></div>
     </div>
     ${b.cobrado>0?`<div class="t2" style="margin-top:8px">Desglose cobrado: cuotas ${fmt$(b.baseC)} · mora ${fmt$(b.moraC)} · cobrador ${fmt$(b.cobC)}</div>`:''}
-    ${socLine}
     ${b.cobrado===0&&b.prestado===0?'<div class="t2" style="margin-top:8px;font-style:italic">Sin movimientos en este mes.</div>':''}
   </div>`;
   return `
