@@ -251,7 +251,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=30; // mantener a la par del número de caché en sw.js
+const APP_VER=31; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -616,6 +616,7 @@ function vInicio(){
     <button class="btn" id="rec-btn" style="background:#25D366;color:#fff;flex:2">🔔 Recordatorios · ${recLista('hoy').length} hoy · ${recLista('vencido').length} vencidos</button>
     <button class="btn sec" id="alias-btn" style="flex:1">📋 Alias</button>
   </div>
+  <button class="btn sec" id="sim-btn" style="margin-top:8px">🧮 Simulador de préstamos</button>
   ${repartoHTML}
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
@@ -1422,7 +1423,52 @@ function formCliente(id){
 function fechaPrimerCobro(freq){ // el primer cobro cae un período después de entregar la plata
   return ymd(new Date(pd(todayStr()).getTime()+FREQ_DAYS[freq]*DAY));
 }
-function formPrestamo(clientId){
+function formSimulador(){
+  modal(`<h3>🧮 Simulador de préstamos</h3>
+  <div class="hint">Calculá al toque sin cargar nada. Probá montos, intereses y cuotas.</div>
+  <div class="frow">
+    <div><label>Monto a prestar</label><input id="sim-monto" type="number" inputmode="decimal" placeholder="100000"></div>
+    <div><label>Interés %</label><input id="sim-int" type="number" inputmode="decimal" placeholder="30"></div>
+  </div>
+  <div class="frow">
+    <div><label>Cant. de cuotas</label><input id="sim-n" type="number" inputmode="numeric" placeholder="30"></div>
+    <div><label>Frecuencia</label><select id="sim-freq">
+      <option value="diaria">Diaria</option><option value="semanal">Semanal</option><option value="quincenal">Quincenal</option></select></div>
+  </div>
+  <div id="sim-out"></div>
+  <div class="btnrow" style="margin-top:16px">
+    <button class="btn sec" id="sim-limpiar">Limpiar</button>
+    <button class="btn" id="sim-crear" style="background:var(--gold);color:#14110a">💵 Crear préstamo con estos datos</button>
+  </div>`);
+  const upd=()=>{
+    const m=+$('#sim-monto').value||0,i=+$('#sim-int').value||0,n=+$('#sim-n').value||0,f=$('#sim-freq').value;
+    const out=$('#sim-out');
+    if(!m||!n){out.innerHTML='<div class="resume" style="margin-top:14px">Completá monto y cuotas para ver el cálculo.</div>';return;}
+    const total=Math.round(m*(1+i/100)), ganancia=total-m;
+    const cs=genCuotas(total,n,f,fechaPrimerCobro(f),false);
+    const perDay={diaria:1,semanal:7,quincenal:14}[f]*n;
+    out.innerHTML=`<div class="stats" style="grid-template-columns:repeat(3,1fr);margin:14px 0 6px">
+      <div class="stat gold"><div class="lbl">Cada cuota</div><div class="val" style="font-size:18px">${fmt$(cs[0].monto)}</div></div>
+      <div class="stat blue"><div class="lbl">Total a devolver</div><div class="val" style="font-size:18px">${fmt$(total)}</div></div>
+      <div class="stat green"><div class="lbl">Ganancia</div><div class="val" style="font-size:18px">${fmt$(ganancia)}</div></div>
+    </div>
+    <div class="resume">
+      ${n} cuotas ${{diaria:'diarias',semanal:'semanales',quincenal:'quincenales'}[f]} de <b>${fmt$(cs[0].monto)}</b>${cs[cs.length-1].monto!==cs[0].monto?` (la última: ${fmt$(cs[cs.length-1].monto)})`:''}<br>
+      Ganás <b>${fmt$(ganancia)}</b> sobre ${fmt$(m)} prestados (interés ${i}%)<br>
+      Cobrás desde ${dLong(cs[0].vence)} hasta ${dLong(cs[cs.length-1].vence)} (${perDay} días aprox.)
+    </div>`;
+  };
+  ['sim-monto','sim-int','sim-n','sim-freq'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
+  $('#sim-limpiar').onclick=()=>{['sim-monto','sim-int','sim-n'].forEach(x=>$('#'+x).value='');upd();};
+  $('#sim-crear').onclick=()=>{
+    const m=+$('#sim-monto').value||0,n=+$('#sim-n').value||0;
+    if(!m||!n)return alert('Completá al menos monto y cantidad de cuotas.');
+    if(!S.clients.length){alert('Para crear un préstamo primero necesitás un cliente. Cargá uno y volvé a usar el simulador.');return;}
+    formPrestamo(null,{monto:+$('#sim-monto').value||'',interes:+$('#sim-int').value||0,n:+$('#sim-n').value||'',freq:$('#sim-freq').value});
+  };
+  upd();
+}
+function formPrestamo(clientId,preset){
   if(!S.clients.length){alert('Primero cargá un cliente.');go('clientes');return;}
   const hoy=todayStr(),inicioDef=fechaPrimerCobro('diaria');
   modal(`<h3>Nuevo préstamo</h3>
@@ -1522,6 +1568,14 @@ function formPrestamo(clientId){
     upd();
   });
   $('#p-sociopct').addEventListener('input',upd);
+  if(preset){ // valores traídos del simulador
+    if(preset.monto!=null)$('#p-monto').value=preset.monto;
+    if(preset.interes!=null)$('#p-int').value=preset.interes;
+    if(preset.n!=null)$('#p-n').value=preset.n;
+    if(preset.freq){$('#p-freq').value=preset.freq;
+      if(!fechaManual)$('#p-inicio').value=fechaPrimerCobro(preset.freq);}
+    upd();
+  }
   $('#p-save').onclick=()=>{
     const m=+$('#p-monto').value,i=+$('#p-int').value||0,n=+$('#p-n').value,f=$('#p-freq').value,ini=$('#p-inicio').value;
     if(!m||m<=0)return alert('Poné el monto prestado');
@@ -1957,7 +2011,8 @@ function bindView(){
   $$('[data-rep]').forEach(b=>b.onclick=()=>{const k=b.dataset.rep;
     repartoOpen.has(k)?repartoOpen.delete(k):repartoOpen.add(k);render();});
   {const rb=$('#rec-btn');if(rb)rb.onclick=()=>{recFilter='hoy';formRecordatorios();};
-   const ab=$('#alias-btn');if(ab)ab.onclick=()=>copiarAlias(ab);}
+   const ab=$('#alias-btn');if(ab)ab.onclick=()=>copiarAlias(ab);
+   const sb=$('#sim-btn');if(sb)sb.onclick=()=>formSimulador();}
   $$('[data-cobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
   $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
