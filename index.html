@@ -251,7 +251,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=31; // mantener a la par del número de caché en sw.js
+const APP_VER=32; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -335,11 +335,19 @@ function cPagadoBase(c){return (c.pagos||[]).reduce((a,p)=>a+(p.monto||0),0);}
 function cMoraPagada(c){return (c.pagos||[]).reduce((a,p)=>a+(p.mora||0),0);}
 function cCobradorPagado(c){return (c.pagos||[]).reduce((a,p)=>a+(p.cobrador||0),0);}
 function cRestante(c){return Math.max(0,c.monto-cPagadoBase(c));}
-function diasAtraso(c){ // días de mora: 1 = pasó la hora límite del día de vencimiento
+function diasAtraso(c){ // días HÁBILES de mora (sáb y dom no cuentan porque no se trabaja)
   if(cRestante(c)<=0)return 0;
-  const lim=dueAt(c.vence).getTime(), now=Date.now();
-  if(now<=lim)return 0;
-  return Math.floor((now-lim)/DAY)+1;
+  const now=Date.now(), hl=S.settings.horaLimite??18;
+  const[Y,M,D]=c.vence.split('-').map(Number);
+  let d=new Date(Y,M-1,D), count=0, guard=0;
+  while(guard++<4000){
+    const limDia=new Date(d.getFullYear(),d.getMonth(),d.getDate(),hl,0,0).getTime();
+    if(limDia>=now)break;      // este día todavía no pasó su hora límite
+    const dow=d.getDay();      // 0=domingo, 6=sábado
+    if(dow!==0&&dow!==6)count++; // solo suma en días hábiles
+    d.setDate(d.getDate()+1);
+  }
+  return count;
 }
 function moraDe(c){ // mora pendiente de cobro
   const d=diasAtraso(c); if(d<=0)return 0;
@@ -1279,7 +1287,7 @@ function vAjustes(){
   </div>
   <h2>⏰ Mora automática</h2>
   <div class="list" style="padding:4px 14px 16px">
-    <div class="hint" style="margin-top:10px">La mora se aplica sola cuando la cuota sigue impaga después de la hora límite del día de vencimiento.</div>
+    <div class="hint" style="margin-top:10px">La mora se aplica sola cuando la cuota sigue impaga después de la hora límite del día de vencimiento. Los <b>sábados y domingos no cuentan</b> como días de atraso (no suman mora ni cobrador).</div>
     <label>Tipo de mora</label>
     <div class="seg" id="set-moratipo">
       <button data-v="pct" class="${st.mora.tipo==='pct'?'on':''}">% de la cuota</button>
