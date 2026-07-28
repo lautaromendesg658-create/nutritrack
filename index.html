@@ -255,7 +255,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=34; // mantener a la par del número de caché en sw.js
+const APP_VER=35; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -646,7 +646,7 @@ function vInicio(){
   <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
   <h2>🔴 Vencidos <span class="cnt">${venc.length}</span></h2>
   ${venc.length?`<div class="chips">
-    ${[['atraso','⏳ Más atrasado'],['reciente','🆕 Reciente'],['monto','💵 Mayor monto'],['cliente','👤 Cliente']].map(([k,t])=>
+    ${[['atraso','⏳ Más atrasado'],['reciente','🆕 Reciente'],['monto','💵 Mayor monto'],['cliente','🔤 A-Z cliente']].map(([k,t])=>
       `<button class="${vencSort===k?'on':''}" data-vs="${k}">${t}</button>`).join('')}
   </div>`:''}
   <div class="list">${venc.length?sortVenc(venc,vencSort).slice(0,40).map(rowCobro).join(''):'<div class="empty">Nada vencido. ¡Todo al día! 🎉</div>'}</div>
