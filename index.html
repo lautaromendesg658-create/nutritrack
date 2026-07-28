@@ -255,7 +255,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=33; // mantener a la par del número de caché en sw.js
+const APP_VER=34; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -525,7 +525,7 @@ setInterval(tickClock,1000);tickClock();
 setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
 
 /* ================= NAVEGACIÓN ================= */
-let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', repartoOpen=new Set();
+let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', repartoOpen=new Set(), vencSort='atraso';
 $$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
 $('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
 function go(v,detail){VIEW=v;DETAIL=detail||null;render();}
@@ -555,6 +555,16 @@ function cobrosVencidos(){
     l.cuotas.forEach(c=>{if(cRestante(c)>0&&(c.vence<t||(c.vence===t&&Date.now()>dueAt(c.vence).getTime())))out.push({l,c});});});
   out.sort((a,b)=>a.c.vence<b.c.vence?-1:1);
   return out;
+}
+function sortVenc(arr,mode){
+  const a=[...arr];
+  const monto=x=>cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c);
+  const nom=x=>(client(x.l.clientId)||{nombre:''}).nombre.toLowerCase();
+  if(mode==='reciente')a.sort((x,y)=>x.c.vence<y.c.vence?1:x.c.vence>y.c.vence?-1:0);
+  else if(mode==='monto')a.sort((x,y)=>monto(y)-monto(x));
+  else if(mode==='cliente')a.sort((x,y)=>nom(x)<nom(y)?-1:nom(x)>nom(y)?1:(x.c.vence<y.c.vence?-1:1));
+  else a.sort((x,y)=>x.c.vence<y.c.vence?-1:x.c.vence>y.c.vence?1:0); // 'atraso': más viejo primero
+  return a;
 }
 function vInicio(){
   const t=todayStr();
@@ -635,7 +645,12 @@ function vInicio(){
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
   <h2>🔴 Vencidos <span class="cnt">${venc.length}</span></h2>
-  <div class="list">${venc.length?venc.slice(0,30).map(rowCobro).join(''):'<div class="empty">Nada vencido. ¡Todo al día! 🎉</div>'}</div>`;
+  ${venc.length?`<div class="chips">
+    ${[['atraso','⏳ Más atrasado'],['reciente','🆕 Reciente'],['monto','💵 Mayor monto'],['cliente','👤 Cliente']].map(([k,t])=>
+      `<button class="${vencSort===k?'on':''}" data-vs="${k}">${t}</button>`).join('')}
+  </div>`:''}
+  <div class="list">${venc.length?sortVenc(venc,vencSort).slice(0,40).map(rowCobro).join(''):'<div class="empty">Nada vencido. ¡Todo al día! 🎉</div>'}</div>
+  ${venc.length>40?'<div class="hint" style="text-align:center">Mostrando los primeros 40 de '+venc.length+'.</div>':''}`;
 }
 function ini(n){return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();}
 
@@ -2037,6 +2052,7 @@ function bindView(){
     const[id,n]=b.dataset.fecha.split('|');formFecha(id,+n);});
   $$('[data-reparto]').forEach(b=>b.onclick=()=>formReparto(b.dataset.reparto));
   $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
+  $$('[data-vs]').forEach(b=>b.onclick=()=>{vencSort=b.dataset.vs;render();});
   $$('[data-cal]').forEach(b=>b.onclick=()=>{calRef=new Date(calRef.getFullYear(),calRef.getMonth()+ +b.dataset.cal,1);render();});
   $$('[data-day]').forEach(b=>b.onclick=()=>{calSel=b.dataset.day;render();});
   $$('[data-edit-cli]').forEach(b=>b.onclick=()=>formCliente(b.dataset.editCli));
