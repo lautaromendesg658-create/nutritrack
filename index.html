@@ -255,7 +255,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=35; // mantener a la par del número de caché en sw.js
+const APP_VER=36; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -789,17 +789,19 @@ function vPrestamo(id){
     const est=estadoCuota(c), rest=cRestante(c);
     const mora=esRenov?0:moraDe(c), cob=esRenov?0:cobradorDe(c); // el saldo renovado pasó al préstamo nuevo: sin mora fantasma
     const cls=est==='pagada'?'pg':(est==='vencida'&&!esRenov)?'vn':est==='hoy'?'hy':'';
-    const badge=est==='pagada'?'<span class="badge b-ok">Pagada</span>'
+    const parcial=cPagadoBase(c)>0&&rest>0;
+    const badge=(est==='pagada'?'<span class="badge b-ok">Pagada</span>'
       :esRenov?'<span class="badge b-com">Renovada</span>'
       :est==='vencida'?`<span class="badge b-ven">${diasAtraso(c)}d mora</span>${cob>0?'<span class="badge b-cob">cobrador</span>':''}`
-      :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>';
+      :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>')
+      +(parcial&&!esRenov?'<span class="badge b-cob">parcial</span>':'');
     const pagosTxt=(c.pagos||[]).map(p=>fmt$((p.monto||0)+(p.mora||0)+(p.cobrador||0))+' el '+new Date(p.t).toLocaleDateString('es-AR',{day:'numeric',month:'short'})
       +(p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` <span class="clip" data-doc="${p.comprobante}">📎 comprobante</span>`:'')).join(', ');
     return `<div class="cuota ${cls}">
       <div class="num">${c.n}</div>
       <div class="mid" style="flex:1;min-width:0">
         <div class="t1" style="font-size:14px">${dLong(c.vence)} ${badge}</div>
-        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${pagosTxt?'<br>💰 '+pagosTxt:''}</div>
+        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${parcial&&!esRenov?`<br><span style="color:var(--orange)">Pagó ${fmt$(cPagadoBase(c))} · restan ${fmt$(rest)}</span>`:''}${pagosTxt?'<br>💰 '+pagosTxt:''}</div>
       </div>
       ${esRenov?'':`<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
         <button class="btn sec mini" data-fecha="${l.id}|${c.n}" title="Cambiar fecha">📅</button>
@@ -1800,10 +1802,18 @@ function formCobro(loanId,nCuota){
   const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
   const cl=client(l.clientId)||{nombre:'?'};
   const rest=cRestante(c),mora=moraDe(c),cob=cobradorDe(c),atr=diasAtraso(c);
+  const yaPago=cPagadoBase(c);
   modal(`<h3>Cobrar cuota ${c.n}/${l.cuotas.length}</h3>
-  <div class="hint">${esc(cl.nombre)} · vencía el ${dLong(c.vence)}${atr>0?` · <span style="color:var(--red)">${atr} día${atr>1?'s':''} de mora</span>`:''}</div>
-  <label>Pago a la cuota (restan ${fmt$(rest)})</label>
+  <div class="hint">${esc(cl.nombre)} · vencía el ${dLong(c.vence)}${atr>0?` · <span style="color:var(--red)">${atr} día${atr>1?'s':''} de mora</span>`:''}
+  ${yaPago>0?`<br>Cuota de ${fmt$(c.monto)} · ya pagó ${fmt$(yaPago)} · <b>restan ${fmt$(rest)}</b>`:''}</div>
+  <label>Tipo de pago</label>
+  <div class="seg" id="co-tipo">
+    <button data-v="total" class="on">✅ Pago total (${fmt$(rest)})</button>
+    <button data-v="parcial">✂️ Pago parcial</button>
+  </div>
+  <label>Pago a la cuota${yaPago>0?' (restan '+fmt$(rest)+')':''}</label>
   <input id="co-base" type="number" inputmode="decimal" value="${rest}">
+  <div class="hint" id="co-queda"></div>
   <label>Mora ${atr>0?'(automática)':''}</label>
   <input id="co-mora" type="number" inputmode="decimal" value="${mora}">
   ${mora>0?'<button class="btn sec mini" id="co-condonar" style="margin-top:8px">🤝 Condonar mora</button>':''}
@@ -1817,9 +1827,35 @@ function formCobro(loanId,nCuota){
     <button class="btn sec" id="co-alias">📋 Copiar alias</button>
   </div>
   <button class="btn green" id="co-save" style="margin-top:16px">✅ Registrar cobro</button>`);
-  const upd=()=>{$('#co-total').textContent=fmt$((+$('#co-base').value||0)+(+$('#co-mora').value||0)+(+$('#co-cob').value||0));};
-  ['co-base','co-mora','co-cob'].forEach(x=>$('#'+x).oninput=upd);
+  let tipoPago='total';
+  const upd=()=>{
+    const base=+$('#co-base').value||0;
+    $('#co-total').textContent=fmt$(base+(+$('#co-mora').value||0)+(+$('#co-cob').value||0));
+    const queda=Math.max(0,rest-base), q=$('#co-queda');
+    if(base>0&&queda>0){
+      q.innerHTML=`⚠️ Queda pendiente <b style="color:var(--orange)">${fmt$(queda)}</b> de esta cuota. `
+        +`Sigue sumando días de mora, calculada siempre sobre la cuota completa (${fmt$(c.monto)}), no sobre el saldo.`;
+    }else if(base>=rest&&rest>0){
+      q.innerHTML='✅ Con este pago la cuota queda <b style="color:var(--green)">saldada</b>.';
+    }else q.innerHTML='';
+  };
+  $$('#co-tipo button').forEach(b=>b.onclick=()=>{
+    tipoPago=b.dataset.v;
+    $$('#co-tipo button').forEach(x=>x.classList.toggle('on',x===b));
+    if(tipoPago==='total')$('#co-base').value=rest;
+    else{$('#co-base').value='';$('#co-base').focus();}
+    upd();
+  });
+  ['co-base','co-mora','co-cob'].forEach(x=>$('#'+x).oninput=()=>{
+    if(x==='co-base'){ // si tocan el monto a mano, el tipo se ajusta solo
+      const base=+$('#co-base').value||0, esTotal=base>=rest;
+      tipoPago=esTotal?'total':'parcial';
+      $$('#co-tipo button').forEach(b=>b.classList.toggle('on',b.dataset.v===tipoPago));
+    }
+    upd();
+  });
   const cond=$('#co-condonar');if(cond)cond.onclick=()=>{$('#co-mora').value=0;upd();};
+  upd();
   let coFile=null;
   $('#co-adj').onclick=()=>$('#co-file').click();
   $('#co-file').onchange=e=>{coFile=e.target.files[0]||null;
@@ -1840,13 +1876,17 @@ function formCobro(loanId,nCuota){
     }
     c.pagos=c.pagos||[];c.pagos.push(pago);
     saveLoan(l);closeModal();render();
+    const queda=cRestante(c);
     const tel=(cl.telefono||'').replace(/\D/g,'');
-    if(tel&&confirm('Cobro registrado ✅\n¿Enviar comprobante por WhatsApp?')){
+    const aviso=queda>0
+      ? `Pago parcial registrado ✅\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).\n\n¿Enviar comprobante por WhatsApp?`
+      : 'Cobro registrado ✅\n¿Enviar comprobante por WhatsApp?';
+    if(tel&&confirm(aviso)){
       const msg=`Hola ${cl.nombre}! Te confirmamos el pago de ${fmt$(base+m+cb)} (cuota ${c.n}/${l.cuotas.length}). `+
-        (cRestante(c)>0?`Queda pendiente ${fmt$(cRestante(c))} de esta cuota. `:'')+
+        (queda>0?`Queda pendiente ${fmt$(queda)} de esta cuota, que sigue generando mora hasta cancelarse. `:'')+
         `Saldo restante del préstamo: ${fmt$(loanRestante(l))}. ¡Gracias! — ${S.settings.nombreNegocio}`;
       window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
-    }
+    }else if(!tel&&queda>0)alert(`Pago parcial registrado ✅\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).`);
   };
 }
 
