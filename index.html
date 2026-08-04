@@ -60,6 +60,13 @@
   .item .mid{flex:1;min-width:0}
   .item .t1{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .item .t2{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* en pantallas angostas los montos del préstamo bajan a una 2da línea para no cortar nada */
+  @media(max-width:620px){
+    .item.loanrow{flex-wrap:wrap}
+    .item.loanrow .mid{flex:1 1 calc(100% - 54px);min-width:0}
+    .item.loanrow .end{flex:1 1 0;text-align:left;margin:6px 0 0!important}
+    .item.loanrow .end:last-child{text-align:right}
+  }
   .item .end{text-align:right;flex-shrink:0}
   .item .m1{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
   .item .m2{font-size:11px;color:var(--muted);margin-top:2px}
@@ -255,7 +262,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=36; // mantener a la par del número de caché en sw.js
+const APP_VER=37; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -707,23 +714,40 @@ function vCliente(id){
 
 /* ================= VISTA: PRÉSTAMOS ================= */
 function loanTieneVencidas(l){return l.cuotas.some(c=>cRestante(c)>0&&diasAtraso(c)>0);}
+function loanDebeHoy(l){ // deuda exigible a hoy: solo cuotas vencidas o que vencen hoy (+ mora y cobrador)
+  if(l.status!=='activo')return 0;
+  const t=todayStr();
+  return l.cuotas.reduce((a,c)=>a+(c.vence<=t?cRestante(c)+moraDe(c)+cobradorDe(c):0),0);
+}
+function loanCuotasVencidasHoy(l){ // cuántas cuotas exigibles a hoy siguen impagas
+  if(l.status!=='activo')return 0;
+  const t=todayStr();
+  return l.cuotas.filter(c=>c.vence<=t&&cRestante(c)>0).length;
+}
+function loanDeudaTotal(l){ // todo lo que resta, incluidas las cuotas futuras + mora acumulada
+  if(l.status!=='activo')return loanRestante(l);
+  return l.cuotas.reduce((a,c)=>a+cRestante(c)+moraDe(c)+cobradorDe(c),0);
+}
 function rowLoan(l){
   const cl=client(l.clientId)||{nombre:'?'};
   const pagado=l.total-loanRestante(l), pct=l.total?Math.round(pagado/l.total*100):0;
   const next=loanCuotasPend(l)[0];
   const late=loanTieneVencidas(l);
+  const debeHoy=loanDebeHoy(l), deudaTot=loanDeudaTotal(l), nVenc=loanCuotasVencidasHoy(l);
   const badge=l.status==='pagado'?'<span class="badge b-ok">Pagado</span>'
     :l.status==='cancelado'?'<span class="badge b-fut">Cancelado</span>'
     :l.status==='renovado'?'<span class="badge b-com">Renovado</span>'
     :late?'<span class="badge b-ven">Atrasado</span>':'<span class="badge b-hoy">Activo</span>';
-  return `<div class="item" data-loan="${l.id}">
+  return `<div class="item loanrow" data-loan="${l.id}">
     <div class="ava ${l.tipo==='comercial'?'shop':''}">${esc(ini(cl.nombre))}</div>
     <div class="mid"><div class="t1">${esc(cl.nombre)} ${badge}</div>
       <div class="t2">${l.tipo==='comercial'?'Comercial':'Personal'} · ${FREQ[l.frecuencia]} · ${l.cuotas.length} cuotas
       ${next?' · próx. '+dShort(next.vence):''}</div>
+      ${debeHoy>0?`<div class="t2" style="color:var(--red);font-weight:700">🔴 Debe hoy ${fmt$(debeHoy)} · ${nVenc} cuota${nVenc===1?'':'s'}</div>`
+        :l.status==='activo'?'<div class="t2" style="color:var(--green)">✅ Al día</div>':''}
       <div class="progress"><i style="width:${pct}%"></i></div></div>
-    <div class="end" style="margin-right:14px"><div class="m1" style="color:var(--gold)">${fmt$(l.monto)}</div><div class="m2">prestado</div></div>
-    <div class="end"><div class="m1">${fmt$(l.total)}</div><div class="m2">a cobrar · ${pct}%</div></div>
+    <div class="end" style="margin-right:10px"><div class="m1" style="color:var(--gold)">${fmt$(l.monto)}</div><div class="m2">prestado</div></div>
+    <div class="end"><div class="m1">${fmt$(deudaTot)}</div><div class="m2">debe en total · ${pct}%</div></div>
   </div>`;
 }
 function vPrestamos(){
@@ -732,15 +756,17 @@ function vPrestamos(){
   else if(loanFilter==='atrasados')ls=ls.filter(l=>l.status==='activo'&&loanTieneVencidas(l));
   else if(loanFilter==='pagados')ls=ls.filter(l=>l.status!=='activo');
   const sumPrestado=ls.reduce((a,l)=>a+(l.monto||0),0);
-  const sumTotal=ls.reduce((a,l)=>a+(l.total||0),0);
+  const sumHoy=ls.reduce((a,l)=>a+loanDebeHoy(l),0);
+  const sumDeuda=ls.reduce((a,l)=>a+loanDeudaTotal(l),0);
   return `
   <div class="chips">
     ${[['activos','Activos'],['atrasados','Atrasados'],['pagados','Finalizados'],['todos','Todos']].map(([k,t])=>
       `<button class="${loanFilter===k?'on':''}" data-lf="${k}">${t}</button>`).join('')}
   </div>
-  ${ls.length?`<div class="resume" style="display:flex;justify-content:space-between;align-items:center">
-    <span>Plata prestada: <b style="color:var(--gold)">${fmt$(sumPrestado)}</b></span>
-    <span>A cobrar: <b>${fmt$(sumTotal)}</b></span>
+  ${ls.length?`<div class="resume balgrid">
+    <div><div class="bn" style="color:var(--gold)">${fmt$(sumPrestado)}</div><div class="bl">plata prestada</div></div>
+    <div><div class="bn" style="color:${sumHoy>0?'var(--red)':'var(--green)'}">${fmt$(sumHoy)}</div><div class="bl">deben hoy</div></div>
+    <div><div class="bn" style="color:var(--blue)">${fmt$(sumDeuda)}</div><div class="bl">deben en total</div></div>
   </div>`:''}
   <div class="list" style="margin-top:12px">${ls.length?ls.map(rowLoan).join(''):'<div class="empty">No hay préstamos en esta vista.<br>Tocá + para crear uno.</div>'}</div>`;
 }
