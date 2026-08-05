@@ -262,7 +262,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=38; // mantener a la par del número de caché en sw.js
+const APP_VER=39; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -736,17 +736,21 @@ function balanceGlobal(){ // foto real del negocio: cuánto pusiste, cuánto hay
     l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
       cuotasC+=p.monto||0; moraC+=p.mora||0; cobC+=p.cobrador||0;}));
   });
-  const cobrado=cuotasC+moraC+cobC;
+  const cobrado=cuotasC+moraC+cobC;                     // efectivo que realmente entró
   const capital=Math.max(0,Number(S.settings.capitalPropio)||0);
   const caja=capital+cobrado-prestado;                  // plata libre para volver a prestar
   const activos=S.loans.filter(l=>l.status==='activo');
-  const calle=activos.reduce((a,l)=>a+loanRestante(l),0); // capital+interés que te deben
+  const calle=activos.reduce((a,l)=>a+loanRestante(l),0); // lo que te deben (NO cuenta como ganancia)
   const moraPend=activos.reduce((a,l)=>a+l.cuotas.reduce((x,c)=>x+moraDe(c)+cobradorDe(c),0),0);
-  const patrimonio=caja+calle;
-  const ganancia=patrimonio-capital;                    // = cobrado - prestado + calle
-  const rent=capital>0?ganancia/capital*100:0;
+  // GANANCIA COBRADA: por cada préstamo, lo que se cobró por encima de su capital. Solo efectivo real.
+  const gananciaCobrada=S.loans.reduce((a,l)=>a+loanGananciaRealizada(l),0);
+  const capitalDevuelto=cobrado-gananciaCobrada;        // la parte de lo cobrado que fue recuperar capital
+  const rentCobrada=capital>0?gananciaCobrada/capital*100:0;
+  // proyección (si cobrás todo lo pendiente), se muestra aparte
+  const gananciaSiCobraTodo=caja+calle-capital;
   const incobrable=S.loans.filter(l=>l.status==='cancelado').reduce((a,l)=>a+loanRestante(l),0);
-  return {capital,cobrado,cuotasC,moraC,cobC,prestado,caja,calle,moraPend,patrimonio,ganancia,rent,nPrest,incobrable};
+  return {capital,cobrado,cuotasC,moraC,cobC,prestado,caja,calle,moraPend,
+    gananciaCobrada,capitalDevuelto,rentCobrada,gananciaSiCobraTodo,nPrest,incobrable};
 }
 function loanDeudaTotal(l){ // todo lo que resta, incluidas las cuotas futuras + mora acumulada
   if(l.status!=='activo')return loanRestante(l);
@@ -1513,39 +1517,41 @@ function fechaPrimerCobro(freq){ // el primer cobro cae un período después de 
 function formGanancia(){
   const b=balanceGlobal();
   const sinCapital=b.capital<=0;
-  const gcol=b.ganancia>=0?'var(--green)':'var(--red)';
+  const gcol=b.gananciaCobrada>0?'var(--green)':'var(--muted)';
   modal(`<h3>📈 Mi ganancia</h3>
   <label>Plata que pusiste de tu bolsillo</label>
   <input id="gan-capital" type="number" inputmode="decimal" value="${b.capital||''}" placeholder="486000">
-  <div class="hint">Solo tu capital propio. Lo que fuiste reinvirtiendo de las ganancias no se cuenta acá: la app lo detecta sola.</div>
   <button class="btn sec mini" id="gan-save" style="margin-top:8px">💾 Guardar capital</button>
   ${sinCapital?'<div class="resume" style="margin-top:14px">Cargá cuánto pusiste de tu bolsillo y guardá para ver tu ganancia real.</div>':`
-  <div class="stats" style="grid-template-columns:repeat(2,1fr);margin:16px 0 6px">
-    <div class="stat blue"><div class="lbl">En la calle</div><div class="val" style="font-size:19px">${fmt$(b.calle)}</div><div class="ex">te deben (capital + interés)</div></div>
-    <div class="stat ${b.caja>=0?'green':'red'}"><div class="lbl">Caja libre</div><div class="val" style="font-size:19px">${fmt$(b.caja)}</div><div class="ex">disponible para prestar</div></div>
-  </div>
-  <div class="resume" style="text-align:center;padding:16px">
-    <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Ganancia neta</div>
-    <div style="font-size:32px;font-weight:800;color:${gcol};margin:6px 0">${b.ganancia<0?'-':''}${fmt$(Math.abs(b.ganancia))}</div>
-    <div style="font-size:13px;color:var(--muted)">Rentabilidad: <b style="color:${gcol}">${b.rent>=0?'+':''}${b.rent.toFixed(1)}%</b> sobre tu capital<br>
-    Cada ${fmt$(100)} tuyos generaron <b>${fmt$(100+b.rent)}</b></div>
+  <div class="resume" style="text-align:center;padding:18px;margin-top:16px">
+    <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Ganancia ya cobrada</div>
+    <div style="font-size:34px;font-weight:800;color:${gcol};margin:6px 0">${fmt$(b.gananciaCobrada)}</div>
+    <div style="font-size:13px;color:var(--muted)">Plata que ya entró y superó lo que prestaste.<br>
+    Rendimiento: <b style="color:${gcol}">${b.rentCobrada>=0?'+':''}${b.rentCobrada.toFixed(1)}%</b> sobre tus ${fmt$(b.capital)}</div>
   </div>
   <div class="resume" style="line-height:1.9">
-    <b>Cómo se llega a ese número</b><br>
-    Patrimonio hoy: <b>${fmt$(b.patrimonio)}</b> <span style="color:var(--muted)">(caja ${fmt$(b.caja)} + calle ${fmt$(b.calle)})</span><br>
-    − Tu capital: <b>${fmt$(b.capital)}</b><br>
-    = <b style="color:${gcol}">${fmt$(b.ganancia)}</b> de ganancia
+    <b>De dónde sale</b><br>
+    Ya cobraste en total: <b>${fmt$(b.cobrado)}</b><br>
+    · devolución del capital prestado: ${fmt$(b.capitalDevuelto)}<br>
+    · <b style="color:${gcol}">ganancia: ${fmt$(b.gananciaCobrada)}</b><br>
+    <span style="font-size:11px;color:var(--muted)">De cada préstamo, recién cuenta como ganancia lo cobrado por encima de su capital.</span>
+  </div>
+  <div class="stats" style="grid-template-columns:repeat(2,1fr);margin:14px 0 6px">
+    <div class="stat ${b.caja>=0?'green':'red'}"><div class="lbl">Caja libre</div><div class="val" style="font-size:19px">${fmt$(b.caja)}</div><div class="ex">disponible para prestar</div></div>
+    <div class="stat blue"><div class="lbl">Por cobrar</div><div class="val" style="font-size:19px">${fmt$(b.calle)}</div><div class="ex">NO cuenta como ganancia</div></div>
+  </div>
+  <div class="resume" style="line-height:1.9">
+    <b>Todavía por cobrar</b> <span style="color:var(--muted)">(aparte, no suma arriba)</span><br>
+    En la calle: <b style="color:var(--blue)">${fmt$(b.calle)}</b>${b.moraPend>0?` + ${fmt$(b.moraPend)} de mora`:''}<br>
+    Si cobrás todo eso, tu ganancia pasaría a <b>${fmt$(b.gananciaSiCobraTodo)}</b>
   </div>
   <div class="resume" style="line-height:1.9">
     <b>Movimientos históricos</b> <span style="color:var(--muted)">(${b.nPrest} préstamo${b.nPrest===1?'':'s'})</span><br>
-    Total entregado: <b>${fmt$(b.prestado)}</b> <span style="color:var(--muted)">(efectivo real, sin contar renovaciones)</span><br>
-    Total cobrado: <b>${fmt$(b.cobrado)}</b><br>
-    · cuotas ${fmt$(b.cuotasC)} · mora ${fmt$(b.moraC)} · cobrador ${fmt$(b.cobC)}
-    ${b.moraPend>0?`<br>Mora pendiente por cobrar: <b style="color:var(--orange)">${fmt$(b.moraPend)}</b> <span style="color:var(--muted)">(no incluida arriba)</span>`:''}
+    Entregaste: <b>${fmt$(b.prestado)}</b> <span style="color:var(--muted)">(efectivo real)</span><br>
+    Cobraste: <b>${fmt$(b.cobrado)}</b> · cuotas ${fmt$(b.cuotasC)} · mora ${fmt$(b.moraC)} · cobrador ${fmt$(b.cobC)}
     ${b.incobrable>0?`<br>En préstamos cancelados quedaron <b style="color:var(--red)">${fmt$(b.incobrable)}</b> sin cobrar`:''}
   </div>
-  ${b.caja<0?`<div class="hint" style="color:var(--orange)">⚠️ La caja da negativa: prestaste más de lo que tu capital + cobros permitirían. Puede que hayas puesto más plata de la cargada arriba, revisalo.</div>`:''}
-  <div class="hint">La ganancia incluye lo que ya cobraste y lo que todavía está en la calle. Si cobrás todo lo pendiente, ese es el número que te queda por encima de lo que pusiste.</div>`}`);
+  ${b.caja<0?`<div class="hint" style="color:var(--orange)">⚠️ La caja da negativa: prestaste más de lo que tu capital + cobros permitirían. Puede que hayas puesto más plata de la cargada arriba, revisalo.</div>`:''}`}`);
   $('#gan-save').onclick=()=>{
     S.settings.capitalPropio=Math.max(0,+$('#gan-capital').value||0);
     saveSettings();formGanancia();
