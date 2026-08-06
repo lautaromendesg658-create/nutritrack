@@ -262,7 +262,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=43; // mantener a la par del número de caché en sw.js
+const APP_VER=44; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -273,7 +273,6 @@ const DEF_SETTINGS={
   mora:{tipo:'pct', valor:10, porDia:false}, horaLimite:18,
   cobrador:{monto:0, dias:3},
   diasNoLaborables:[0,6], // días que no cuentan para la mora (0=dom … 6=sáb). Por defecto sáb y dom
-  capitalPropio:0, // plata propia que el dueño puso de su bolsillo (para medir la ganancia real)
   socios:[],
   recordatorios:{...DEF_REC},
   updatedAt:0
@@ -650,10 +649,7 @@ function vInicio(){
     <button class="btn" id="rec-btn" style="background:#25D366;color:#fff;flex:2">🔔 Recordatorios · ${recLista('hoy').length} hoy · ${recLista('vencido').length} vencidos</button>
     <button class="btn sec" id="alias-btn" style="flex:1">📋 Alias</button>
   </div>
-  <div class="btnrow" style="margin-top:8px">
-    <button class="btn sec" id="gan-btn">📈 Mi ganancia</button>
-    <button class="btn sec" id="sim-btn">🧮 Simulador</button>
-  </div>
+  <button class="btn sec" id="sim-btn" style="margin-top:8px">🧮 Simulador de préstamos</button>
   ${repartoHTML}
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
@@ -729,40 +725,6 @@ function loanCuotasVencidasHoy(l){ // cuántas cuotas exigibles a hoy siguen imp
   if(l.status!=='activo')return 0;
   const t=todayStr();
   return l.cuotas.filter(c=>c.vence<=t&&cRestante(c)>0).length;
-}
-function balanceGlobal(){ // foto real del negocio: cuánto pusiste, cuánto hay, cuánto ganaste
-  let cuotasC=0,moraC=0,cobC=0,prestado=0,nPrest=0;
-  S.loans.forEach(l=>{
-    // efectivo que realmente salió de tu bolsillo (en renovaciones solo la diferencia)
-    prestado+=Math.max(0,(l.monto||0)-(l.refinanciado||0)); nPrest++;
-    l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
-      cuotasC+=p.monto||0; moraC+=p.mora||0; cobC+=p.cobrador||0;}));
-  });
-  const cobrado=cuotasC+moraC+cobC;                     // efectivo que realmente entró
-  const capital=Math.max(0,Number(S.settings.capitalPropio)||0);
-  const caja=capital+cobrado-prestado;                  // plata libre para volver a prestar
-  const activos=S.loans.filter(l=>l.status==='activo');
-  const calle=activos.reduce((a,l)=>a+loanRestante(l),0); // lo que te deben (NO cuenta como ganancia)
-  const moraPend=activos.reduce((a,l)=>a+l.cuotas.reduce((x,c)=>x+moraDe(c)+cobradorDe(c),0),0);
-  // GANANCIA COBRADA: por cada préstamo, lo que se cobró por encima de su capital. Solo efectivo real.
-  // De esa ganancia, se descuenta la parte que le toca a cada socio gestor.
-  let gananciaCobrada=0, miGanancia=0, miProyectada=0; const socGanancia={};
-  S.loans.forEach(l=>{
-    const g=loanGananciaRealizada(l), r=loanReparto(l);
-    const miPct=r.compartido?r.miPct:100;
-    gananciaCobrada+=g;
-    miGanancia+=g*miPct/100;
-    miProyectada+=loanGananciaProyectada(l)*miPct/100;
-    if(r.compartido&&g>0)socGanancia[r.socioNom]=(socGanancia[r.socioNom]||0)+g*r.socioPct/100;
-  });
-  gananciaCobrada=Math.round(gananciaCobrada); miGanancia=Math.round(miGanancia); miProyectada=Math.round(miProyectada);
-  Object.keys(socGanancia).forEach(k=>socGanancia[k]=Math.round(socGanancia[k]));
-  const paraSocios=gananciaCobrada-miGanancia;
-  const capitalDevuelto=cobrado-gananciaCobrada;        // la parte de lo cobrado que fue recuperar capital
-  const rentCobrada=capital>0?miGanancia/capital*100:0; // el rendimiento se mide sobre TU parte
-  const incobrable=S.loans.filter(l=>l.status==='cancelado').reduce((a,l)=>a+loanRestante(l),0);
-  return {capital,cobrado,cuotasC,moraC,cobC,prestado,caja,calle,moraPend,
-    gananciaCobrada,miGanancia,paraSocios,socGanancia,capitalDevuelto,rentCobrada,miProyectada,nPrest,incobrable};
 }
 function loanDeudaTotal(l){ // todo lo que resta, incluidas las cuotas futuras + mora acumulada
   if(l.status!=='activo')return loanRestante(l);
@@ -1373,8 +1335,6 @@ function vAjustes(){
     <label>Nombre del negocio</label><input id="set-nombre" value="${esc(st.nombreNegocio)}">
     <label>Símbolo de moneda</label><input id="set-moneda" value="${esc(st.moneda)}" style="max-width:120px">
     <label>Alias para cobrar (aparece en los términos y condiciones)</label><input id="set-alias" value="${esc(st.alias||'')}" placeholder="PRESTAMOSPPP.1986">
-    <label>Capital propio invertido (para calcular tu ganancia)</label><input id="set-capital" type="number" inputmode="decimal" value="${st.capitalPropio||''}" placeholder="486000">
-    <div class="hint">Plata que pusiste de tu bolsillo. Se usa en 📈 Mi ganancia.</div>
   </div>
   <h2>⏰ Mora automática</h2>
   <div class="list" style="padding:4px 14px 16px">
@@ -1525,77 +1485,6 @@ function formCliente(id){
 
 function fechaPrimerCobro(freq){ // el primer cobro cae un período después de entregar la plata
   return ymd(new Date(pd(todayStr()).getTime()+FREQ_DAYS[freq]*DAY));
-}
-function formGanancia(){
-  const b=balanceGlobal();
-  const sinCapital=b.capital<=0;
-  const gcol=b.miGanancia>0?'var(--green)':'var(--muted)';
-  modal(`<h3>📈 Mi ganancia</h3>
-  <label>Plata que pusiste de tu bolsillo</label>
-  <input id="gan-capital" type="number" inputmode="decimal" value="${b.capital||''}" placeholder="486000">
-  <button class="btn sec mini" id="gan-save" style="margin-top:8px">💾 Guardar capital</button>
-  ${sinCapital?'<div class="resume" style="margin-top:14px">Cargá cuánto pusiste de tu bolsillo y guardá para ver tu ganancia real.</div>':`
-  <div class="resume" style="text-align:center;padding:18px;margin-top:16px">
-    <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Tu ganancia ya cobrada</div>
-    <div style="font-size:34px;font-weight:800;color:${gcol};margin:6px 0">${fmt$(b.miGanancia)}</div>
-    <div style="font-size:13px;color:var(--muted)">Plata que ya entró y superó lo que prestaste${b.paraSocios>0?', descontada la parte de tus socios':''}.<br>
-    Rendimiento: <b style="color:${gcol}">${b.rentCobrada>=0?'+':''}${b.rentCobrada.toFixed(1)}%</b> sobre tus ${fmt$(b.capital)}</div>
-  </div>
-  <div class="resume" style="line-height:1.9">
-    <b>De dónde sale</b><br>
-    Ya cobraste en total: <b>${fmt$(b.cobrado)}</b><br>
-    · devolución del capital prestado: ${fmt$(b.capitalDevuelto)}<br>
-    · ganancia generada: <b>${fmt$(b.gananciaCobrada)}</b>
-    ${b.paraSocios>0?`<br>&nbsp;&nbsp;· <b style="color:${gcol}">tu parte: ${fmt$(b.miGanancia)}</b>`
-      +Object.entries(b.socGanancia).map(([n,v])=>`<br>&nbsp;&nbsp;· <span style="color:var(--blue)">${esc(n)}: ${fmt$(v)}</span>`).join('')
-      :''}<br>
-    <span style="font-size:11px;color:var(--muted)">De cada préstamo, recién cuenta como ganancia lo cobrado por encima de su capital${b.paraSocios>0?', y de ahí se reparte con el socio que lo gestiona':''}.</span>
-  </div>
-  <div class="stats" style="grid-template-columns:repeat(2,1fr);margin:14px 0 6px">
-    <div class="stat ${b.caja>=0?'green':'red'}"><div class="lbl">Caja libre</div><div class="val" style="font-size:19px">${fmt$(b.caja)}</div><div class="ex">disponible para prestar</div></div>
-    <div class="stat blue"><div class="lbl">Por cobrar</div><div class="val" style="font-size:19px">${fmt$(b.calle)}</div><div class="ex">NO cuenta como ganancia</div></div>
-  </div>
-  <div class="resume" style="line-height:1.9">
-    <b>Todavía por cobrar</b> <span style="color:var(--muted)">(aparte, no suma arriba)</span><br>
-    En la calle: <b style="color:var(--blue)">${fmt$(b.calle)}</b>${b.moraPend>0?` + ${fmt$(b.moraPend)} de mora`:''}<br>
-    Si cobrás todo eso, tu parte pasaría a <b>${fmt$(b.miProyectada)}</b>
-  </div>
-  <details class="resume" style="line-height:1.7">
-    <summary><b>Ver préstamo por préstamo</b> <span style="color:var(--muted)">(por qué da ese número)</span></summary>
-    ${(()=>{const filas=S.loans.map(l=>{
-        const cl=client(l.clientId)||{nombre:'?'};
-        const cobr=loanTotalCobrado(l), g=loanGananciaRealizada(l), falta=Math.max(0,(l.monto||0)-cobr);
-        const r=loanReparto(l);
-        return {nom:cl.nombre,monto:l.monto||0,cobr,g,falta,
-          comp:r.compartido,soc:r.socioNom,socPct:r.socioPct,miPct:r.miPct,
-          mia:r.compartido?Math.round(g*r.miPct/100):g,
-          delSocio:r.compartido?Math.round(g*r.socioPct/100):0};
-      }).sort((x,y)=>y.mia-x.mia||x.falta-y.falta);
-      if(!filas.length)return '<div class="t2">Todavía no hay préstamos.</div>';
-      return filas.map(f=>`<div style="padding:8px 0;border-top:1px solid var(--line)">
-        <div class="t1" style="font-size:14px">${esc(f.nom)}${f.comp?` <span class="badge b-com">con ${esc(f.soc)}</span>`:''}</div>
-        <div class="t2">Prestaste ${fmt$(f.monto)} · cobraste ${fmt$(f.cobr)}</div>
-        <div class="t2" style="color:${f.g>0?'var(--green)':'var(--orange)'};font-weight:700">
-          ${f.g>0?(f.comp
-              ?`✅ Ganancia ${fmt$(f.g)} → <span style="color:var(--green)">tuya ${fmt$(f.mia)} (${f.miPct}%)</span> · <span style="color:var(--blue)">${esc(f.soc)} ${fmt$(f.delSocio)} (${f.socPct}%)</span>`
-              :`✅ Ganancia: ${fmt$(f.g)}`)
-            :`⏳ Faltan cobrar ${fmt$(f.falta)} para empezar a ganar`}</div>
-      </div>`).join('');})()}
-  </details>
-  <div class="resume" style="line-height:1.9">
-    <b>Movimientos históricos</b> <span style="color:var(--muted)">(${b.nPrest} préstamo${b.nPrest===1?'':'s'})</span><br>
-    Entregaste: <b>${fmt$(b.prestado)}</b> <span style="color:var(--muted)">(efectivo real)</span><br>
-    Cobraste: <b>${fmt$(b.cobrado)}</b> · cuotas ${fmt$(b.cuotasC)} · mora ${fmt$(b.moraC)} · cobrador ${fmt$(b.cobC)}
-    ${b.incobrable>0?`<br>En préstamos cancelados quedaron <b style="color:var(--red)">${fmt$(b.incobrable)}</b> sin cobrar`:''}
-  </div>
-  ${b.caja<0?`<div class="hint" style="color:var(--orange)">⚠️ La caja da negativa: prestaste más de lo que tu capital + cobros permitirían. Puede que hayas puesto más plata de la cargada arriba, revisalo.</div>`:''}
-  <button class="btn sec" id="gan-refresh" style="margin-top:14px">🔄 Actualizar</button>
-  <div class="hint" style="text-align:center">Se recalcula solo cada vez que abrís este panel.</div>`}`);
-  {const rf=$('#gan-refresh');if(rf)rf.onclick=()=>formGanancia();}
-  $('#gan-save').onclick=()=>{
-    S.settings.capitalPropio=Math.max(0,+$('#gan-capital').value||0);
-    saveSettings();formGanancia();
-  };
 }
 function formSimulador(){
   modal(`<h3>🧮 Simulador de préstamos</h3>
@@ -2253,8 +2142,7 @@ function bindView(){
     repartoOpen.has(k)?repartoOpen.delete(k):repartoOpen.add(k);render();});
   {const rb=$('#rec-btn');if(rb)rb.onclick=()=>{recFilter='hoy';formRecordatorios();};
    const ab=$('#alias-btn');if(ab)ab.onclick=()=>copiarAlias(ab);
-   const sb=$('#sim-btn');if(sb)sb.onclick=()=>formSimulador();
-   const gb=$('#gan-btn');if(gb)gb.onclick=()=>formGanancia();}
+   const sb=$('#sim-btn');if(sb)sb.onclick=()=>formSimulador();}
   $$('[data-cobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
   $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
@@ -2312,7 +2200,6 @@ function bindView(){
       S.settings.nombreNegocio=$('#set-nombre').value.trim()||'Mi Negocio';
       S.settings.moneda=$('#set-moneda').value.trim()||'$';
       S.settings.alias=$('#set-alias').value.trim();
-      S.settings.capitalPropio=Math.max(0,+$('#set-capital').value||0);
       S.settings.mora={tipo:moratipo,valor:+$('#set-moraval').value||0,porDia};
       S.settings.diasNoLaborables=$$('#set-dias button.on').map(b=>+b.dataset.v);
       S.settings.horaLimite=+$('#set-hora').value;
