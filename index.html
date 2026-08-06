@@ -262,7 +262,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=39; // mantener a la par del número de caché en sw.js
+const APP_VER=40; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1902,23 +1902,28 @@ function formCobro(loanId,nCuota){
   const cl=client(l.clientId)||{nombre:'?'};
   const rest=cRestante(c),mora=moraDe(c),cob=cobradorDe(c),atr=diasAtraso(c);
   const yaPago=cPagadoBase(c);
+  const debeTotal=rest+mora+cob;
   modal(`<h3>Cobrar cuota ${c.n}/${l.cuotas.length}</h3>
   <div class="hint">${esc(cl.nombre)} · vencía el ${dLong(c.vence)}${atr>0?` · <span style="color:var(--red)">${atr} día${atr>1?'s':''} de mora</span>`:''}
-  ${yaPago>0?`<br>Cuota de ${fmt$(c.monto)} · ya pagó ${fmt$(yaPago)} · <b>restan ${fmt$(rest)}</b>`:''}</div>
+  ${yaPago>0?`<br>Cuota de ${fmt$(c.monto)} · ya pagó ${fmt$(yaPago)}`:''}
+  <br>Debe ahora: <b style="color:var(--gold)">${fmt$(debeTotal)}</b>
+  <span style="font-size:11px">(cuota ${fmt$(rest)}${mora>0?' + mora '+fmt$(mora):''}${cob>0?' + cobrador '+fmt$(cob):''})</span></div>
   <label>Tipo de pago</label>
   <div class="seg" id="co-tipo">
-    <button data-v="total" class="on">✅ Pago total (${fmt$(rest)})</button>
+    <button data-v="total" class="on">✅ Pagó todo (${fmt$(debeTotal)})</button>
     <button data-v="parcial">✂️ Pago parcial</button>
   </div>
-  <label>Pago a la cuota${yaPago>0?' (restan '+fmt$(rest)+')':''}</label>
-  <input id="co-base" type="number" inputmode="decimal" value="${rest}">
+  <label>Total que te pagó</label>
+  <input id="co-recibido" type="number" inputmode="decimal" value="${debeTotal}">
   <div class="hint" id="co-queda"></div>
-  <label>Mora ${atr>0?'(automática)':''}</label>
-  <input id="co-mora" type="number" inputmode="decimal" value="${mora}">
-  ${mora>0?'<button class="btn sec mini" id="co-condonar" style="margin-top:8px">🤝 Condonar mora</button>':''}
-  <label>Cargo de cobrador ${cob>0?'(automático: +'+(S.settings.cobrador.dias||3)+' días de mora)':''}</label>
-  <input id="co-cob" type="number" inputmode="decimal" value="${cob}">
-  <div class="resume">Total a cobrar: <b id="co-total">${fmt$(rest+mora+cob)}</b></div>
+  ${mora>0?'<button class="btn sec mini" id="co-condonar" style="margin-top:8px">🤝 Condonar la mora</button>':''}
+  <details id="co-adv" style="margin-top:12px">
+    <summary>Ajustar el reparto a mano</summary>
+    <label>A la cuota</label><input id="co-base" type="number" inputmode="decimal" value="${rest}">
+    <label>A la mora</label><input id="co-mora" type="number" inputmode="decimal" value="${mora}">
+    <label>Al cobrador</label><input id="co-cob" type="number" inputmode="decimal" value="${cob}">
+  </details>
+  <div class="resume">Total a cobrar: <b id="co-total">${fmt$(debeTotal)}</b></div>
   <label>Comprobante de transferencia (opcional · en PC podés pegarlo con Ctrl+V)</label>
   <input type="file" id="co-file" accept="image/*" style="display:none">
   <div class="btnrow" style="margin-top:0">
@@ -1926,35 +1931,59 @@ function formCobro(loanId,nCuota){
     <button class="btn sec" id="co-alias">📋 Copiar alias</button>
   </div>
   <button class="btn green" id="co-save" style="margin-top:16px">✅ Registrar cobro</button>`);
-  let tipoPago='total';
-  const upd=()=>{
-    const base=+$('#co-base').value||0;
-    $('#co-total').textContent=fmt$(base+(+$('#co-mora').value||0)+(+$('#co-cob').value||0));
-    const queda=Math.max(0,rest-base), q=$('#co-queda');
-    if(base>0&&queda>0){
-      q.innerHTML=`⚠️ Queda pendiente <b style="color:var(--orange)">${fmt$(queda)}</b> de esta cuota. `
-        +`Sigue sumando días de mora, calculada siempre sobre la cuota completa (${fmt$(c.monto)}), no sobre el saldo.`;
-    }else if(base>=rest&&rest>0){
-      q.innerHTML='✅ Con este pago la cuota queda <b style="color:var(--green)">saldada</b>.';
-    }else q.innerHTML='';
+  let moraACobrar=mora;
+  // reparte lo que te pagó: primero la mora, después el cobrador, y lo que sobra a la cuota
+  const repartir=r=>{
+    r=Math.max(0,r);
+    const m=Math.min(r,moraACobrar); r-=m;
+    const cb=Math.min(r,cob); r-=cb;
+    return {base:r,mora:m,cobrador:cb};
+  };
+  const pintarDesglose=()=>{
+    const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
+    $('#co-total').textContent=fmt$(base+m+cb);
+    const quedaCuota=Math.max(0,rest-base), quedaMora=Math.max(0,moraACobrar-m), quedaCob=Math.max(0,cob-cb);
+    const debeDespues=quedaCuota+quedaMora+quedaCob, q=$('#co-queda');
+    const partes=[];
+    if(m>0)partes.push(`mora ${fmt$(m)}`);
+    if(cb>0)partes.push(`cobrador ${fmt$(cb)}`);
+    if(base>0)partes.push(`cuota ${fmt$(base)}`);
+    if(base+m+cb<=0){q.innerHTML='';return;}
+    let txt=`Se aplica a: ${partes.join(' · ')}`;
+    if(debeDespues>0){
+      txt+=`<br>⚠️ Le queda debiendo <b style="color:var(--orange)">${fmt$(debeDespues)}</b>`
+        +(quedaCuota>0?` (${fmt$(quedaCuota)} de cuota${quedaMora>0?` + ${fmt$(quedaMora)} de mora`:''}). La cuota sigue abierta y sumando mora sobre su valor completo (${fmt$(c.monto)}).`:'.');
+    }else{
+      txt+='<br>✅ Con este pago la cuota queda <b style="color:var(--green)">saldada</b>.';
+    }
+    q.innerHTML=txt;
+  };
+  const aplicarRecibido=()=>{
+    const r=repartir(+$('#co-recibido').value||0);
+    $('#co-base').value=r.base; $('#co-mora').value=r.mora; $('#co-cob').value=r.cobrador;
+    pintarDesglose();
   };
   $$('#co-tipo button').forEach(b=>b.onclick=()=>{
-    tipoPago=b.dataset.v;
     $$('#co-tipo button').forEach(x=>x.classList.toggle('on',x===b));
-    if(tipoPago==='total')$('#co-base').value=rest;
-    else{$('#co-base').value='';$('#co-base').focus();}
-    upd();
+    if(b.dataset.v==='total')$('#co-recibido').value=rest+moraACobrar+cob;
+    else{$('#co-recibido').value='';$('#co-recibido').focus();}
+    aplicarRecibido();
   });
-  ['co-base','co-mora','co-cob'].forEach(x=>$('#'+x).oninput=()=>{
-    if(x==='co-base'){ // si tocan el monto a mano, el tipo se ajusta solo
-      const base=+$('#co-base').value||0, esTotal=base>=rest;
-      tipoPago=esTotal?'total':'parcial';
-      $$('#co-tipo button').forEach(b=>b.classList.toggle('on',b.dataset.v===tipoPago));
-    }
-    upd();
+  $('#co-recibido').oninput=()=>{
+    aplicarRecibido();
+    const r=+$('#co-recibido').value||0, esTotal=r>=rest+moraACobrar+cob;
+    $$('#co-tipo button').forEach(b=>b.classList.toggle('on',b.dataset.v===(esTotal?'total':'parcial')));
+  };
+  ['co-base','co-mora','co-cob'].forEach(x=>$('#'+x).oninput=()=>{ // reparto manual: el total sigue la suma
+    $('#co-recibido').value=(+$('#co-base').value||0)+(+$('#co-mora').value||0)+(+$('#co-cob').value||0);
+    pintarDesglose();
   });
-  const cond=$('#co-condonar');if(cond)cond.onclick=()=>{$('#co-mora').value=0;upd();};
-  upd();
+  const cond=$('#co-condonar');if(cond)cond.onclick=()=>{
+    moraACobrar=0; $('#co-mora').value=0;
+    $('#co-recibido').value=rest+cob; aplicarRecibido();
+    cond.textContent='🤝 Mora condonada'; cond.disabled=true;
+  };
+  pintarDesglose();
   let coFile=null;
   $('#co-adj').onclick=()=>$('#co-file').click();
   $('#co-file').onchange=e=>{coFile=e.target.files[0]||null;
