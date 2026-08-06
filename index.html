@@ -262,7 +262,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=41; // mantener a la par del número de caché en sw.js
+const APP_VER=42; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -345,7 +345,9 @@ const FREQ={diaria:'Diaria',semanal:'Semanal',quincenal:'Quincenal'};
 const FREQ_DAYS={diaria:1,semanal:7,quincenal:14};
 
 /* ================= LÓGICA DE CUOTAS / MORA ================= */
-function cPagadoBase(c){return (c.pagos||[]).reduce((a,p)=>a+(p.monto||0),0);}
+function cPagadoBase(c){return (c.pagos||[]).reduce((a,p)=>a+(p.monto||0),0);} // solo lo aplicado a la cuota
+function cTotalRecibido(c){ // toda la plata que entró por esta cuota: cuota + mora + cobrador
+  return (c.pagos||[]).reduce((a,p)=>a+(p.monto||0)+(p.mora||0)+(p.cobrador||0),0);}
 function cMoraPagada(c){return (c.pagos||[]).reduce((a,p)=>a+(p.mora||0),0);}
 function cCobradorPagado(c){return (c.pagos||[]).reduce((a,p)=>a+(p.cobrador||0),0);}
 function cRestante(c){return Math.max(0,c.monto-cPagadoBase(c));}
@@ -855,7 +857,7 @@ function vPrestamo(id){
       <div class="num">${c.n}</div>
       <div class="mid" style="flex:1;min-width:0">
         <div class="t1" style="font-size:14px">${dLong(c.vence)} ${badge}</div>
-        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${parcial&&!esRenov?`<br><span style="color:var(--orange)">Pagó ${fmt$(cPagadoBase(c))} · restan ${fmt$(rest)}</span>`:''}${pagosTxt?'<br>💰 '+pagosTxt:''}</div>
+        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${parcial&&!esRenov?`<br><span style="color:var(--orange)">De la cuota pagó ${fmt$(cPagadoBase(c))} · restan ${fmt$(rest)}</span>`:''}${(c.pagos||[]).length?`<br>💰 Te pagó <b>${fmt$(cTotalRecibido(c))}</b>${cTotalRecibido(c)!==cPagadoBase(c)?` <span style="color:var(--muted)">(${fmt$(cMoraPagada(c)+cCobradorPagado(c))} fue a mora/cobrador)</span>`:''}: ${pagosTxt}`:''}</div>
       </div>
       ${esRenov?'':`<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
         <button class="btn sec mini" data-fecha="${l.id}|${c.n}" title="Cambiar fecha">📅</button>
@@ -1923,7 +1925,7 @@ function formCobro(loanId,nCuota){
   const debeTotal=rest+mora+cob;
   modal(`<h3>Cobrar cuota ${c.n}/${l.cuotas.length}</h3>
   <div class="hint">${esc(cl.nombre)} · vencía el ${dLong(c.vence)}${atr>0?` · <span style="color:var(--red)">${atr} día${atr>1?'s':''} de mora</span>`:''}
-  ${yaPago>0?`<br>Cuota de ${fmt$(c.monto)} · ya pagó ${fmt$(yaPago)}`:''}
+  ${yaPago>0?`<br>Cuota de ${fmt$(c.monto)} · ya cubrió ${fmt$(yaPago)} de la cuota${cTotalRecibido(c)!==yaPago?` (te pagó ${fmt$(cTotalRecibido(c))} en total, ${fmt$(cTotalRecibido(c)-yaPago)} fue a mora/cobrador)`:''}`:''}
   <br>Debe ahora: <b style="color:var(--gold)">${fmt$(debeTotal)}</b>
   <span style="font-size:11px">(cuota ${fmt$(rest)}${mora>0?' + mora '+fmt$(mora):''}${cob>0?' + cobrador '+fmt$(cob):''})</span></div>
   <label>Tipo de pago</label>
