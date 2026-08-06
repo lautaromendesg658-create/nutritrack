@@ -262,7 +262,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=40; // mantener a la par del número de caché en sw.js
+const APP_VER=41; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1545,13 +1545,31 @@ function formGanancia(){
     En la calle: <b style="color:var(--blue)">${fmt$(b.calle)}</b>${b.moraPend>0?` + ${fmt$(b.moraPend)} de mora`:''}<br>
     Si cobrás todo eso, tu ganancia pasaría a <b>${fmt$(b.gananciaSiCobraTodo)}</b>
   </div>
+  <details class="resume" style="line-height:1.7">
+    <summary><b>Ver préstamo por préstamo</b> <span style="color:var(--muted)">(por qué da ese número)</span></summary>
+    ${(()=>{const filas=S.loans.map(l=>{
+        const cl=client(l.clientId)||{nombre:'?'};
+        const cobr=loanTotalCobrado(l), g=loanGananciaRealizada(l), falta=Math.max(0,(l.monto||0)-cobr);
+        return {nom:cl.nombre,monto:l.monto||0,cobr,g,falta};
+      }).sort((x,y)=>y.g-x.g||x.falta-y.falta);
+      if(!filas.length)return '<div class="t2">Todavía no hay préstamos.</div>';
+      return filas.map(f=>`<div style="padding:8px 0;border-top:1px solid var(--line)">
+        <div class="t1" style="font-size:14px">${esc(f.nom)}</div>
+        <div class="t2">Prestaste ${fmt$(f.monto)} · cobraste ${fmt$(f.cobr)}</div>
+        <div class="t2" style="color:${f.g>0?'var(--green)':'var(--orange)'};font-weight:700">
+          ${f.g>0?`✅ Ganancia: ${fmt$(f.g)}`:`⏳ Faltan cobrar ${fmt$(f.falta)} para empezar a ganar`}</div>
+      </div>`).join('');})()}
+  </details>
   <div class="resume" style="line-height:1.9">
     <b>Movimientos históricos</b> <span style="color:var(--muted)">(${b.nPrest} préstamo${b.nPrest===1?'':'s'})</span><br>
     Entregaste: <b>${fmt$(b.prestado)}</b> <span style="color:var(--muted)">(efectivo real)</span><br>
     Cobraste: <b>${fmt$(b.cobrado)}</b> · cuotas ${fmt$(b.cuotasC)} · mora ${fmt$(b.moraC)} · cobrador ${fmt$(b.cobC)}
     ${b.incobrable>0?`<br>En préstamos cancelados quedaron <b style="color:var(--red)">${fmt$(b.incobrable)}</b> sin cobrar`:''}
   </div>
-  ${b.caja<0?`<div class="hint" style="color:var(--orange)">⚠️ La caja da negativa: prestaste más de lo que tu capital + cobros permitirían. Puede que hayas puesto más plata de la cargada arriba, revisalo.</div>`:''}`}`);
+  ${b.caja<0?`<div class="hint" style="color:var(--orange)">⚠️ La caja da negativa: prestaste más de lo que tu capital + cobros permitirían. Puede que hayas puesto más plata de la cargada arriba, revisalo.</div>`:''}
+  <button class="btn sec" id="gan-refresh" style="margin-top:14px">🔄 Actualizar</button>
+  <div class="hint" style="text-align:center">Se recalcula solo cada vez que abrís este panel.</div>`}`);
+  {const rf=$('#gan-refresh');if(rf)rf.onclick=()=>formGanancia();}
   $('#gan-save').onclick=()=>{
     S.settings.capitalPropio=Math.max(0,+$('#gan-capital').value||0);
     saveSettings();formGanancia();
