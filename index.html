@@ -156,6 +156,7 @@
   .cday .dots{display:flex;gap:3px}
   .cday .dot{width:6px;height:6px;border-radius:99px}
   .d-ok{background:var(--green)} .d-ven{background:var(--red)} .d-pen{background:var(--blue)} .d-hoy{background:var(--gold)}
+  .d-pago{background:var(--green);box-shadow:0 0 0 2px rgba(61,220,132,.25)} /* día en que cobraste */
 
   /* docs */
   .docgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
@@ -262,7 +263,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=44; // mantener a la par del número de caché en sw.js
+const APP_VER=45; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -552,11 +553,17 @@ function render(){
 function applyBiz(){$('#bizname').textContent=S.settings.nombreNegocio||'PrestaControl';}
 
 /* ================= VISTA: INICIO ================= */
-function cobrosDelDia(fecha){
+function cobrosDelDia(fecha){ // cuotas PROGRAMADAS para ese día (lo que hay que cobrar)
   const out=[];
   S.loans.forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
     l.cuotas.forEach(c=>{if(c.vence===fecha)out.push({l,c});});});
   return out;
+}
+function pagosDelDia(fecha){ // pagos REALMENTE recibidos ese día, de todos los préstamos (incluye renovados)
+  const out=[];
+  S.loans.forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
+    if(ymd(new Date(p.t))===fecha)out.push({l,c,p});})));
+  return out.sort((a,b)=>a.p.t-b.p.t);
 }
 function cobrosVencidos(){
   const t=todayStr(),out=[];
@@ -727,13 +734,16 @@ function loanCuotasVencidasHoy(l){ // cuántas cuotas exigibles a hoy siguen imp
   return l.cuotas.filter(c=>c.vence<=t&&cRestante(c)>0).length;
 }
 function loanDeudaTotal(l){ // todo lo que resta, incluidas las cuotas futuras + mora acumulada
+  if(l.status==='renovado')return 0; // el saldo pasó al préstamo nuevo: acá ya no se debe nada
   if(l.status!=='activo')return loanRestante(l);
   return l.cuotas.reduce((a,c)=>a+cRestante(c)+moraDe(c)+cobradorDe(c),0);
 }
 function rowLoan(l){
   const cl=client(l.clientId)||{nombre:'?'};
-  const pagado=l.total-loanRestante(l), pct=l.total?Math.round(pagado/l.total*100):0;
-  const next=loanCuotasPend(l)[0];
+  const renov=l.status==='renovado'; // el saldo se descontó de lo entregado en el préstamo nuevo
+  const pagado=l.total-loanRestante(l);
+  const pct=renov?100:(l.total?Math.round(pagado/l.total*100):0);
+  const next=renov?null:loanCuotasPend(l)[0];
   const late=loanTieneVencidas(l);
   const debeHoy=loanDebeHoy(l), deudaTot=loanDeudaTotal(l), nVenc=loanCuotasVencidasHoy(l);
   const badge=l.status==='pagado'?'<span class="badge b-ok">Pagado</span>'
@@ -746,10 +756,11 @@ function rowLoan(l){
       <div class="t2">${l.tipo==='comercial'?'Comercial':'Personal'} · ${FREQ[l.frecuencia]} · ${l.cuotas.length} cuotas
       ${next?' · próx. '+dShort(next.vence):''}</div>
       ${debeHoy>0?`<div class="t2" style="color:var(--red);font-weight:700">🔴 Debe hoy ${fmt$(debeHoy)} · ${nVenc} cuota${nVenc===1?'':'s'}</div>`
+        :renov?`<div class="t2" style="color:var(--blue)">🔄 Saldado con la renovación${loanRestante(l)>0?` (${fmt$(loanRestante(l))} pasaron al préstamo nuevo)`:''}</div>`
         :l.status==='activo'?'<div class="t2" style="color:var(--green)">✅ Al día</div>':''}
       <div class="progress"><i style="width:${pct}%"></i></div></div>
     <div class="end" style="margin-right:10px"><div class="m1" style="color:var(--gold)">${fmt$(l.monto)}</div><div class="m2">prestado</div></div>
-    <div class="end"><div class="m1">${fmt$(deudaTot)}</div><div class="m2">debe en total · ${pct}%</div></div>
+    <div class="end"><div class="m1">${fmt$(deudaTot)}</div><div class="m2">${renov?'saldado':'debe en total · '+pct+'%'}</div></div>
   </div>`;
 }
 function vPrestamos(){
@@ -786,8 +797,11 @@ function vPrestamo(id){
       <div class="ex">inició ${dLong(l.inicio)}</div></div>
     <div class="stat blue"><div class="lbl">Capital + interés</div><div class="val" style="font-size:17px">${fmt$(l.monto)} + ${l.interes}%</div>
       <div class="ex">total ${fmt$(l.total)}</div></div>
-    <div class="stat ${restante>0?'orange':'green'}"><div class="lbl">Restante</div><div class="val" style="font-size:17px">${fmt$(restante)}</div>
-      <div class="ex">${l.status==='pagado'?'¡préstamo saldado!':(()=>{const p=loanCuotasPend(l).length;return p+' cuota'+(p===1?'':'s')+' pendiente'+(p===1?'':'s')+' de '+fmt$(l.cuotas[0].monto);})()}</div></div>
+    <div class="stat ${l.status==='renovado'?'green':restante>0?'orange':'green'}"><div class="lbl">Restante</div>
+      <div class="val" style="font-size:17px">${fmt$(l.status==='renovado'?0:restante)}</div>
+      <div class="ex">${l.status==='renovado'?`saldado con la renovación${restante>0?' ('+fmt$(restante)+' pasaron al nuevo)':''}`
+        :l.status==='pagado'?'¡préstamo saldado!'
+        :(()=>{const p=loanCuotasPend(l).length;return p+' cuota'+(p===1?'':'s')+' pendiente'+(p===1?'':'s')+' de '+fmt$(l.cuotas[0].monto);})()}</div></div>
     <div class="stat ${moraTot>0?'red':'green'}"><div class="lbl">Mora acumulada</div><div class="val" style="font-size:17px">${fmt$(moraTot)}</div></div>
   </div>
   ${(()=>{const r=loanReparto(l);
@@ -1278,6 +1292,8 @@ function vCalendario(){
   for(let d=1;d<=dim;d++){
     const f=ymd(new Date(y,m,d));
     const cob=cobrosDelDia(f);
+    const pgs=pagosDelDia(f);
+    const cobradoDia=pgs.reduce((a,x)=>a+(x.p.monto||0)+(x.p.mora||0)+(x.p.cobrador||0),0);
     const tot=cob.reduce((a,x)=>a+x.c.monto,0);
     let dots='';
     if(cob.length){
@@ -1287,8 +1303,10 @@ function vCalendario(){
       else if(f===t)dots='<span class="dot d-hoy"></span>';
       else dots='<span class="dot d-pen"></span>';
     }
+    if(pgs.length)dots+='<span class="dot d-pago" title="cobraste este día"></span>';
     cells+=`<div class="cday ${f===t?'today':''} ${f===calSel?'sel':''}" data-day="${f}">
-      <span>${d}</span>${cob.length?`<span class="amt">${fmt$(tot)}</span>`:''}<span class="dots">${dots}</span></div>`;
+      <span>${d}</span>${cobradoDia>0?`<span class="amt" style="color:var(--green)">${fmt$(cobradoDia)}</span>`
+        :cob.length?`<span class="amt">${fmt$(tot)}</span>`:''}<span class="dots">${dots}</span></div>`;
   }
   const sel=cobrosDelDia(calSel);
   const mesNom=calRef.toLocaleDateString('es-AR',{month:'long',year:'numeric'});
@@ -1323,7 +1341,22 @@ function vCalendario(){
         <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${FREQ[l.frecuencia]}</div></div>
       <div class="end"><div class="m1">${fmt$(c.monto)}</div>
         <div class="m2">${rest<=0?'<span style="color:var(--green)">✓ pagada</span>':estadoCuota(c)==='vencida'?'<span style="color:var(--red)">vencida</span>':'pendiente'}</div></div>
-    </div>`;}).join(''):'<div class="empty">Sin cobros este día</div>'}</div>`;
+    </div>`;}).join(''):'<div class="empty">Sin cobros este día</div>'}</div>
+  ${(()=>{const pgs=pagosDelDia(calSel);
+    if(!pgs.length)return '';
+    const totDia=pgs.reduce((a,x)=>a+(x.p.monto||0)+(x.p.mora||0)+(x.p.cobrador||0),0);
+    return `<h2>💰 Pagos recibidos <span class="cnt">${fmt$(totDia)}</span></h2>
+    <div class="list">${pgs.map(({l,c,p})=>{
+      const cl=client(l.clientId)||{nombre:'?'};
+      const tot=(p.monto||0)+(p.mora||0)+(p.cobrador||0);
+      const extras=[]; if(p.mora>0)extras.push('mora '+fmt$(p.mora)); if(p.cobrador>0)extras.push('cobrador '+fmt$(p.cobrador));
+      return `<div class="item" data-loan="${l.id}">
+        <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
+        <div class="mid"><div class="t1">${esc(cl.nombre)}${l.status==='renovado'?' <span class="badge b-com">renovado</span>':''}</div>
+          <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${new Date(p.t).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} hs${extras.length?' · '+extras.join(' · '):''}
+          ${p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` · <span class="clip" data-doc="${p.comprobante}">📎</span>`:''}</div></div>
+        <div class="end"><div class="m1" style="color:var(--green)">${fmt$(tot)}</div><div class="m2">cobrado</div></div>
+      </div>`;}).join('')}</div>`;})()}`;
 }
 
 /* ================= VISTA: AJUSTES ================= */
