@@ -263,7 +263,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=45; // mantener a la par del número de caché en sw.js
+const APP_VER=46; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1094,10 +1094,14 @@ async function compartirContratoPDF(l,tipo){
   const fname='Contrato_'+(cl.nombre||'cliente').replace(/[^\w]+/g,'_')+'.pdf';
   const file=new File([blob],fname,{type:'application/pdf'});
   if(navigator.canShare&&navigator.canShare({files:[file]})){
-    try{await navigator.share({files:[file],title:'Contrato PRESTAMOS PPP',text:'Contrato de '+(cl.nombre||'')});return 'shared';}
-    catch(e){if(e&&e.name==='AbortError')return 'cancel';throw e;}
+    // Se comparte SOLO el archivo: si además se manda texto, WhatsApp en iOS suele rechazar el envío.
+    try{await navigator.share({files:[file]});return 'shared';}
+    catch(e){
+      if(e&&e.name==='AbortError')return 'cancel';
+      console.error('share',e); // si el sistema falla, seguimos con la descarga como respaldo
+    }
   }
-  // sin Web Share (ej. PC): descarga el PDF para adjuntarlo
+  // sin Web Share (ej. PC) o si compartir falló: descarga el PDF para adjuntarlo a mano
   const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=fname;a.click();
   setTimeout(()=>URL.revokeObjectURL(url),8000);
   return 'download';
@@ -1252,10 +1256,10 @@ function armarContrato(id,tipo){
   ov.querySelector('.cclose').onclick=()=>ov.remove();
   const waBtn=ov.querySelector('.cwa');
   waBtn.onclick=async()=>{
-    const prev=waBtn.textContent;waBtn.textContent='⏳ Generando…';waBtn.disabled=true;
+    const prev=waBtn.textContent;waBtn.textContent='⏳ Preparando…';waBtn.disabled=true;
     try{
       const r=await compartirContratoPDF(l,tipo);
-      if(r==='download')alert('Tu dispositivo no permite compartir archivos directamente (suele pasar en la PC).\n\nDescargué el PDF del contrato: adjuntalo en el chat de WhatsApp del cliente.');
+      if(r==='download')alert('Descargué el PDF del contrato para que lo adjuntes vos.\n\nSi WhatsApp Business te pidió "ejecutalo desde la pantalla de inicio": abrí WhatsApp Business una vez, volvé acá y probá de nuevo.');
     }catch(e){
       console.error(e);
       if(confirm('No se pudo generar el PDF en este dispositivo. ¿Querés enviar el contrato como mensaje de texto por WhatsApp?')){
