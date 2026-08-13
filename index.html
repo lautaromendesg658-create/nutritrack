@@ -263,7 +263,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=46; // mantener a la par del número de caché en sw.js
+const APP_VER=47; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1086,25 +1086,16 @@ function buildContratoPDF(l,tipo){
     doc.text('PRESTAMOS PPP  ·  Comerciales y Personales  ·  Agilidad y Confianza  ·  Zona Sur',W/2,H-14,{align:'center'});}
   return doc;
 }
-async function compartirContratoPDF(l,tipo){
+function pdfLista(){return !!(window.jspdf&&window.jspdf.jsPDF);}
+function armarPdfFile(l,tipo){ // sincrónico: requiere que jsPDF ya esté cargada
   const cl=client(l.clientId)||{};
-  await loadPdfLib();
-  const doc=buildContratoPDF(l,tipo);
-  const blob=doc.output('blob');
+  const blob=buildContratoPDF(l,tipo).output('blob');
   const fname='Contrato_'+(cl.nombre||'cliente').replace(/[^\w]+/g,'_')+'.pdf';
-  const file=new File([blob],fname,{type:'application/pdf'});
-  if(navigator.canShare&&navigator.canShare({files:[file]})){
-    // Se comparte SOLO el archivo: si además se manda texto, WhatsApp en iOS suele rechazar el envío.
-    try{await navigator.share({files:[file]});return 'shared';}
-    catch(e){
-      if(e&&e.name==='AbortError')return 'cancel';
-      console.error('share',e); // si el sistema falla, seguimos con la descarga como respaldo
-    }
-  }
-  // sin Web Share (ej. PC) o si compartir falló: descarga el PDF para adjuntarlo a mano
+  return {blob,fname,file:new File([blob],fname,{type:'application/pdf'})};
+}
+function descargarPdf(blob,fname){
   const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=fname;a.click();
   setTimeout(()=>URL.revokeObjectURL(url),8000);
-  return 'download';
 }
 
 /* ================= CONTRATO PDF ================= */
@@ -1255,17 +1246,40 @@ function armarContrato(id,tipo){
   const f=ov.querySelector('iframe');f.srcdoc=html;
   ov.querySelector('.cclose').onclick=()=>ov.remove();
   const waBtn=ov.querySelector('.cwa');
-  waBtn.onclick=async()=>{
-    const prev=waBtn.textContent;waBtn.textContent='⏳ Preparando…';waBtn.disabled=true;
-    try{
-      const r=await compartirContratoPDF(l,tipo);
-      if(r==='download')alert('Descargué el PDF del contrato para que lo adjuntes vos.\n\nSi WhatsApp Business te pidió "ejecutalo desde la pantalla de inicio": abrí WhatsApp Business una vez, volvé acá y probá de nuevo.');
-    }catch(e){
+  const prevLbl=waBtn.textContent;
+  const guardarYAvisar=(blob,fname)=>{
+    descargarPdf(blob,fname);
+    const msg='Guardé el PDF del contrato en tu teléfono.\n\n'
+      +'iOS a veces no deja pasar el archivo directo a WhatsApp Business. Para mandarlo:\n'
+      +'1) Abrí WhatsApp Business\n2) Entrá al chat del cliente\n3) Tocá 📎 → Documento y elegí el contrato guardado'
+      +(tel?'\n\n¿Abro el chat del cliente ahora?':'');
+    if(tel&&confirm(msg))waOpen(cl.telefono,'');
+    else if(!tel)alert(msg);
+  };
+  // iOS exige que navigator.share salga DENTRO del toque: por eso no usamos await antes de llamarlo
+  waBtn.onclick=()=>{
+    if(!pdfLista()){ // la librería todavía no terminó de cargar
+      waBtn.textContent='⏳ Preparando…';waBtn.disabled=true;
+      loadPdfLib().then(()=>{waBtn.textContent=prevLbl;waBtn.disabled=false;
+          alert('Ya está listo el generador de PDF. Tocá "Enviar PDF" otra vez.');})
+        .catch(()=>{waBtn.textContent=prevLbl;waBtn.disabled=false;
+          if(confirm('No se pudo cargar el generador de PDF. ¿Enviar el contrato como texto por WhatsApp?')){
+            if(!tel)alert('El cliente no tiene teléfono cargado.');else waOpen(cl.telefono,contratoTexto(l,tipo));}});
+      return;
+    }
+    let p; try{p=armarPdfFile(l,tipo);}catch(e){
       console.error(e);
       if(confirm('No se pudo generar el PDF en este dispositivo. ¿Querés enviar el contrato como mensaje de texto por WhatsApp?')){
-        if(!tel)alert('El cliente no tiene teléfono cargado.');else waOpen(cl.telefono,contratoTexto(l,tipo));
-      }
-    }finally{waBtn.textContent=prev;waBtn.disabled=false;}
+        if(!tel)alert('El cliente no tiene teléfono cargado.');else waOpen(cl.telefono,contratoTexto(l,tipo));}
+      return;
+    }
+    if(navigator.canShare&&navigator.canShare({files:[p.file]})){
+      navigator.share({files:[p.file]}).catch(e=>{
+        if(e&&e.name==='AbortError')return;      // el usuario cerró el menú: no hacemos nada
+        console.error('share',e);
+        guardarYAvisar(p.blob,p.fname);          // el sistema rechazó el envío: dejamos el PDF guardado
+      });
+    }else guardarYAvisar(p.blob,p.fname);
   };
   ov.querySelector('.cprint').onclick=()=>{
     try{f.contentWindow.focus();f.contentWindow.print();}
