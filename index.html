@@ -265,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=48; // mantener a la par del número de caché en sw.js
+const APP_VER=49; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -343,6 +343,13 @@ function dShort(s){const d=pd(s);return d.toLocaleDateString('es-AR',{day:'numer
 function dLong(s){const d=pd(s);return d.toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});}
 const client=id=>S.clients.find(c=>c.id===id);
 const loan=id=>S.loans.find(l=>l.id===id);
+/* ----- SESIÓN: el dueño ve todo; un socio ve solo lo suyo ----- */
+let SESSION={rol:'dueno',socioId:null,nombre:''};
+try{const s=JSON.parse(sessionStorage.getItem('pc-sesion')||'null');if(s&&s.rol)SESSION=s;}catch(e){}
+const esSocio=()=>SESSION.rol==='socio';
+const vLoans=()=>esSocio()?S.loans.filter(l=>l.gestorId===SESSION.socioId):S.loans;
+const vClients=()=>esSocio()?S.clients.filter(c=>c.gestorId===SESSION.socioId):S.clients;
+function puedeVer(l){return !esSocio()||l.gestorId===SESSION.socioId;} // para pantallas de detalle
 const FREQ={diaria:'Diaria',semanal:'Semanal',quincenal:'Quincenal'};
 const FREQ_DAYS={diaria:1,semanal:7,quincenal:14};
 
@@ -402,6 +409,7 @@ function loanGananciaRealizada(l){ // recién es ganancia lo que se cobra por en
 function loanFaltaParaNeutro(l){ // cuánto falta cobrar de este préstamo para recuperar el capital
   return Math.max(0, (l.monto||0)-loanTotalCobrado(l));
 }
+function socioPct(id){const s=(S.settings.socios||[]).find(x=>x.id===id);return s&&s.pct!=null?s.pct:50;}
 function socioNombre(id){
   const s=(S.settings.socios||[]).find(x=>x.id===id);
   return s?s.nombre:null;
@@ -557,19 +565,19 @@ function applyBiz(){$('#bizname').textContent=S.settings.nombreNegocio||'PrestaC
 /* ================= VISTA: INICIO ================= */
 function cobrosDelDia(fecha){ // cuotas PROGRAMADAS para ese día (lo que hay que cobrar)
   const out=[];
-  S.loans.forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
+  vLoans().forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
     l.cuotas.forEach(c=>{if(c.vence===fecha)out.push({l,c});});});
   return out;
 }
 function pagosDelDia(fecha){ // pagos REALMENTE recibidos ese día, de todos los préstamos (incluye renovados)
   const out=[];
-  S.loans.forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
+  vLoans().forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
     if(ymd(new Date(p.t))===fecha)out.push({l,c,p});})));
   return out.sort((a,b)=>a.p.t-b.p.t);
 }
 function cobrosVencidos(){
   const t=todayStr(),out=[];
-  S.loans.forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
+  vLoans().forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
     l.cuotas.forEach(c=>{if(cRestante(c)>0&&(c.vence<t||(c.vence===t&&Date.now()>dueAt(c.vence).getTime())))out.push({l,c});});});
   out.sort((a,b)=>a.c.vence<b.c.vence?-1:1);
   return out;
@@ -586,7 +594,7 @@ function sortVenc(arr,mode){
 }
 function vInicio(){
   const t=todayStr();
-  const activos=S.loans.filter(l=>l.status==='activo');
+  const activos=vLoans().filter(l=>l.status==='activo');
   const prestado=activos.reduce((a,l)=>a+l.monto,0);
   const porCobrar=activos.reduce((a,l)=>a+loanRestante(l),0);
   const hoy=cobrosDelDia(t).filter(x=>cRestante(x.c)>0);
@@ -594,19 +602,26 @@ function vInicio(){
   const venc=cobrosVencidos();
   const vencMonto=venc.reduce((a,x)=>a+cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c),0);
   let cobradoHoy=0;
-  S.loans.forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
+  vLoans().forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
     if(ymd(new Date(p.t))===t)cobradoHoy+=(p.monto||0)+(p.mora||0)+(p.cobrador||0);})));
   const interes=activos.reduce((a,l)=>a+(l.total-l.monto),0);
 
   // reparto de ganancias por socio (sobre préstamos activos)
   let miTotal=0,miReal=0; const misLoans=[]; const porSocio={};
   activos.forEach(l=>{const r=loanReparto(l);
-    miTotal+=r.miParteTotal||0; miReal+=r.miParteReal||0;
-    misLoans.push({l,parte:r.miParteTotal||0,pct:r.compartido?r.miPct:100});
-    if(r.compartido){const k=r.socioNom;
+    // si entra un socio, "mi parte" es la suya; si entra el dueño, la del dueño
+    const propioT=esSocio()?(r.socioParteTotal||0):(r.miParteTotal||0);
+    const propioR=esSocio()?(r.socioParteReal||0):(r.miParteReal||0);
+    const propioP=esSocio()?(r.socioPct||0):(r.compartido?r.miPct:100);
+    miTotal+=propioT; miReal+=propioR;
+    misLoans.push({l,parte:propioT,pct:propioP});
+    if(r.compartido){const k=esSocio()?'Dueño del negocio':r.socioNom;
+      const otroT=esSocio()?(r.miParteTotal||0):r.socioParteTotal;
+      const otroR=esSocio()?(r.miParteReal||0):r.socioParteReal;
+      const otroP=esSocio()?r.miPct:r.socioPct;
       if(!porSocio[k])porSocio[k]={total:0,real:0,loans:[]};
-      porSocio[k].total+=r.socioParteTotal; porSocio[k].real+=r.socioParteReal;
-      porSocio[k].loans.push({l,parte:r.socioParteTotal,pct:r.socioPct});}});
+      porSocio[k].total+=otroT; porSocio[k].real+=otroR;
+      porSocio[k].loans.push({l,parte:otroT,pct:otroP});}});
   const haySocios=Object.keys(porSocio).length>0;
   const subItems=(loans,color)=>loans.length?loans.map(({l,parte,pct})=>{
     const cl=client(l.clientId)||{nombre:'?'};
@@ -645,7 +660,7 @@ function vInicio(){
 
   return `
   <div class="stats">
-    <div class="stat blue"><div class="lbl">Clientes</div><div class="val">${S.clients.length}</div></div>
+    <div class="stat blue"><div class="lbl">Clientes</div><div class="val">${vClients().length}</div></div>
     <div class="stat gold"><div class="lbl">Préstamos activos</div><div class="val">${activos.length}</div></div>
     <div class="stat gold"><div class="lbl">Plata prestada</div><div class="val">${fmt$(prestado)}</div><div class="ex">capital activo en la calle</div></div>
     <div class="stat blue"><div class="lbl">Por cobrar</div><div class="val">${fmt$(porCobrar)}</div><div class="ex">incluye interés</div></div>
@@ -673,15 +688,15 @@ function vInicio(){
 function ini(n){return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();}
 
 /* ================= VISTA: CLIENTES ================= */
-function clienteDeuda(id){return S.loans.filter(l=>l.clientId===id&&l.status==='activo').reduce((a,l)=>a+loanRestante(l),0);}
+function clienteDeuda(id){return vLoans().filter(l=>l.clientId===id&&l.status==='activo').reduce((a,l)=>a+loanRestante(l),0);}
 function vClientes(){
   const q=cliQ.toLowerCase();
-  const cs=S.clients.filter(c=>!q||c.nombre.toLowerCase().includes(q)||(c.telefono||'').includes(q))
+  const cs=vClients().filter(c=>!q||c.nombre.toLowerCase().includes(q)||(c.telefono||'').includes(q))
     .sort((a,b)=>a.nombre.localeCompare(b.nombre));
   return `
   <div class="search"><input id="cliq" placeholder="Buscar cliente…" value="${esc(cliQ)}"></div>
   <div class="list">${cs.length?cs.map(c=>{
-    const act=S.loans.filter(l=>l.clientId===c.id&&l.status==='activo').length;
+    const act=vLoans().filter(l=>l.clientId===c.id&&l.status==='activo').length;
     const deuda=clienteDeuda(c.id);
     return `<div class="item" data-cli="${c.id}">
       <div class="ava ${c.tipo==='comercio'?'shop':''}">${esc(ini(c.nombre))}</div>
@@ -692,8 +707,9 @@ function vClientes(){
 }
 function vCliente(id){
   const c=client(id); if(!c)return '<div class="empty">Cliente no encontrado</div>';
+  if(esSocio()&&c.gestorId!==SESSION.socioId)return '<div class="empty">Este cliente no está asignado a tu cuenta.</div>';
   const docs=S.docs.filter(d=>d.clientId===id);
-  const loans=S.loans.filter(l=>l.clientId===id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const loans=vLoans().filter(l=>l.clientId===id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   const tel=(c.telefono||'').replace(/\D/g,'');
   return `
   <button class="back" data-go="clientes">← Clientes</button>
@@ -766,7 +782,7 @@ function rowLoan(l){
   </div>`;
 }
 function vPrestamos(){
-  let ls=[...S.loans].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  let ls=[...vLoans()].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   if(loanFilter==='activos')ls=ls.filter(l=>l.status==='activo');
   else if(loanFilter==='atrasados')ls=ls.filter(l=>l.status==='activo'&&loanTieneVencidas(l));
   else if(loanFilter==='pagados')ls=ls.filter(l=>l.status!=='activo');
@@ -787,6 +803,7 @@ function vPrestamos(){
 }
 function vPrestamo(id){
   const l=loan(id); if(!l)return '<div class="empty">Préstamo no encontrado</div>';
+  if(!puedeVer(l))return '<div class="empty">Este préstamo no está asignado a tu cuenta.</div>';
   const cl=client(l.clientId)||{nombre:'?'};
   const restante=loanRestante(l);
   const moraTot=l.status==='activo'?l.cuotas.reduce((a,c)=>a+moraDe(c)+cobradorDe(c),0):0;
@@ -941,7 +958,7 @@ function enviarTyC(loanId){
 /* ----- RECORDATORIOS DE VENCIMIENTO ----- */
 function recLista(tipo){
   const t=todayStr(), man=ymd(new Date(pd(t).getTime()+DAY)), out=[];
-  S.loans.forEach(l=>{if(l.status!=='activo')return;
+  vLoans().forEach(l=>{if(l.status!=='activo')return;
     l.cuotas.forEach(c=>{if(cRestante(c)<=0)return;
       if(tipo==='hoy'&&c.vence===t)out.push({l,c});
       else if(tipo==='manana'&&c.vence===man)out.push({l,c});
@@ -1293,14 +1310,14 @@ function armarContrato(id,tipo){
 /* ================= VISTA: CALENDARIO ================= */
 function balanceMes(y,m){ // vista simple de caja del mes: cuánto salió y cuánto entró
   let cobrado=0,baseC=0,moraC=0,cobC=0,nCobros=0;
-  S.loans.forEach(l=>{
+  vLoans().forEach(l=>{
     l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{const d=new Date(p.t);
       if(d.getFullYear()===y&&d.getMonth()===m){
         const base=p.monto||0,mo=p.mora||0,co=p.cobrador||0;
         cobrado+=base+mo+co;baseC+=base;moraC+=mo;cobC+=co;nCobros++;
       }}));});
   let prestado=0,nNuevos=0;
-  S.loans.forEach(l=>{if(!l.createdAt)return;const d=new Date(l.createdAt);
+  vLoans().forEach(l=>{if(!l.createdAt)return;const d=new Date(l.createdAt);
     if(d.getFullYear()===y&&d.getMonth()===m){prestado+=Math.max(0,(l.monto||0)-(l.refinanciado||0));nNuevos++;}});
   return {cobrado,baseC,moraC,cobC,nCobros,prestado,nNuevos,neto:cobrado-prestado};
 }
@@ -1382,8 +1399,38 @@ function vCalendario(){
 }
 
 /* ================= VISTA: AJUSTES ================= */
+function vMiCuenta(){ // pantalla reducida para un socio: sin ajustes del negocio
+  const soc=(S.settings.socios||[]).find(x=>x.id===SESSION.socioId);
+  const mios=vLoans(), act=mios.filter(l=>l.status==='activo');
+  const gan=mios.reduce((a,l)=>{const r=loanReparto(l);return a+loanGananciaRealizada(l)*(r.compartido?r.socioPct:0)/100;},0);
+  return `
+  <h2>👤 Mi cuenta</h2>
+  <div class="list" style="padding:14px">
+    <div class="t1" style="font-size:17px">${esc(soc?soc.nombre:SESSION.nombre)}</div>
+    <div class="t2">Socio gestor · te corresponde el <b>${socioPct(SESSION.socioId)}%</b> de la ganancia de tus préstamos</div>
+    <div class="t2" style="margin-top:6px">${vClients().length} cliente(s) · ${act.length} préstamo(s) activo(s)</div>
+    <div class="t2" style="color:var(--green);font-weight:700;margin-top:6px">Tu ganancia ya cobrada: ${fmt$(Math.round(gan))}</div>
+  </div>
+  <div class="hint">El porcentaje y los ajustes del negocio (mora, cobrador, alias) los administra el dueño.</div>
+  <h2>🔄 Sincronización</h2>
+  <div class="list" style="padding:14px">
+    <div class="t2">Estado: <b>${FB.status==='on'?'✅ Conectado y sincronizando':'⏳ Conectando…'}</b></div>
+    <div class="t2" style="margin-top:4px">Todo lo que cargues acá le llega al dueño al instante, y al revés.</div>
+  </div>
+  <h2>🔐 Seguridad</h2>
+  <div class="list" style="padding:14px">
+    <div class="hint" style="margin-top:0">Usuario: <b>${esc((cuentasSocio().find(c=>c.socioId===SESSION.socioId)||{}).user||'')}</b></div>
+    <div class="btnrow">
+      <button class="btn sec" id="mc-clave">Cambiar mi contraseña</button>
+      <button class="btn sec" id="sec-lock">🔒 Cerrar sesión</button>
+    </div>
+  </div>
+  <button class="btn sec" id="buscar-upd" style="margin-top:14px">🔁 Buscar actualización</button>
+  <div class="hint" style="text-align:center;margin-top:18px">PrestaControl · versión ${APP_VER} · hecho a medida ✨</div>`;
+}
 function vAjustes(){
   const st=S.settings,fb=fbCfg();
+  if(esSocio())return vMiCuenta();
   return `
   <h2>🏪 Negocio</h2>
   <div class="list" style="padding:4px 14px 16px">
@@ -1434,12 +1481,15 @@ function vAjustes(){
 
   <h2>🤝 Socios / Gestores <span class="cnt">${(st.socios||[]).length}</span></h2>
   <div class="list" style="padding:4px 14px 16px">
-    <div class="hint" style="margin-top:10px">Agregá a las personas que gestionan clientes y se reparten la ganancia con vos. Después, al crear un préstamo, elegís el socio y qué porcentaje le toca. Tu parte se calcula sola.</div>
+    <div class="hint" style="margin-top:10px">Agregá a las personas que gestionan clientes y se reparten la ganancia con vos. Podés darles <b>acceso a la app</b>: entran con su usuario y ven únicamente sus clientes, sus préstamos y su parte de la ganancia.</div>
     <div id="socios-list" style="margin-top:6px">
       ${(st.socios||[]).length?(st.socios||[]).map(s=>`<div class="item" style="cursor:default;padding-left:0;padding-right:0">
         <div class="ava">${esc(ini(s.nombre))}</div>
-        <div class="mid"><div class="t1">${esc(s.nombre)}</div>
-          <div class="t2">${S.loans.filter(l=>l.gestorId===s.id).length} préstamo(s) asignado(s)</div></div>
+        <div class="mid"><div class="t1">${esc(s.nombre)} <span class="badge ${cuentasSocio().some(c=>c.socioId===s.id)?'b-ok':'b-fut'}">${cuentasSocio().some(c=>c.socioId===s.id)?'con acceso':'sin acceso'}</span></div>
+          <div class="t2">${S.loans.filter(l=>l.gestorId===s.id).length} préstamo(s) · le toca el ${s.pct!=null?s.pct:50}% de la ganancia</div>
+          <div class="t2"><span class="clip" data-acceso="${s.id}">🔑 ${cuentasSocio().some(c=>c.socioId===s.id)?'cambiar acceso':'dar acceso a la app'}</span>
+            · <span class="clip" data-socpct="${s.id}">✏️ cambiar %</span>
+            ${cuentasSocio().some(c=>c.socioId===s.id)?` · <span class="undo" data-quitaracceso="${s.id}">quitar acceso</span>`:''}</div></div>
         <button class="btn red mini" data-del-socio="${s.id}">🗑</button>
       </div>`).join(''):'<div class="empty" style="padding:18px">Todavía no agregaste socios</div>'}
     </div>
@@ -1524,6 +1574,10 @@ function formCliente(id){
   <label>Dirección</label><input id="f-dir" value="${esc(c.direccion||'')}">
   <label>Perfil de Facebook (link o usuario)</label><input id="f-fb" inputmode="url" placeholder="facebook.com/usuario" value="${esc(c.facebook||'')}">
   <label>Notas</label><textarea id="f-notas">${esc(c.notas||'')}</textarea>
+  ${esSocio()?'':`<label>Gestionado por</label>
+  <select id="f-gestor"><option value="">Yo (el dueño)</option>
+    ${(S.settings.socios||[]).map(x=>`<option value="${x.id}" ${c.gestorId===x.id?'selected':''}>${esc(x.nombre)}</option>`).join('')}</select>
+  <div class="hint">Si lo asignás a un socio, ese cliente aparece en su cuenta.</div>`}
   <button class="btn" id="f-save" style="margin-top:18px">Guardar cliente</button>`);
   let tipo=c.tipo||'persona';
   $$('#f-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
@@ -1534,6 +1588,9 @@ function formCliente(id){
     const obj=id?{...c}:{id:uid(),createdAt:Date.now()};
     Object.assign(obj,{nombre,tipo,telefono:$('#f-tel').value.trim(),dni:$('#f-dni').value.trim(),
       direccion:$('#f-dir').value.trim(),facebook:$('#f-fb').value.trim(),notas:$('#f-notas').value.trim()});
+    // el socio solo puede crear clientes suyos; el dueño elige a quién asignarlo
+    if(esSocio())obj.gestorId=SESSION.socioId;
+    else{const g=$('#f-gestor');obj.gestorId=g&&g.value?g.value:null;}
     saveClient(obj);closeModal();go('clientes',obj.id);
   };
 }
@@ -1581,17 +1638,17 @@ function formSimulador(){
   $('#sim-crear').onclick=()=>{
     const m=+$('#sim-monto').value||0,n=+$('#sim-n').value||0;
     if(!m||!n)return alert('Completá al menos monto y cantidad de cuotas.');
-    if(!S.clients.length){alert('Para crear un préstamo primero necesitás un cliente. Cargá uno y volvé a usar el simulador.');return;}
+    if(!vClients().length){alert('Para crear un préstamo primero necesitás un cliente. Cargá uno y volvé a usar el simulador.');return;}
     formPrestamo(null,{monto:+$('#sim-monto').value||'',interes:+$('#sim-int').value||0,n:+$('#sim-n').value||'',freq:$('#sim-freq').value});
   };
   upd();
 }
 function formPrestamo(clientId,preset){
-  if(!S.clients.length){alert('Primero cargá un cliente.');go('clientes');return;}
+  if(!vClients().length){alert('Primero cargá un cliente.');go('clientes');return;}
   const hoy=todayStr(),inicioDef=fechaPrimerCobro('diaria');
   modal(`<h3>Nuevo préstamo</h3>
   <label>Cliente *</label>
-  <select id="p-cli">${S.clients.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(c=>
+  <select id="p-cli">${vClients().slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(c=>
     `<option value="${c.id}" ${c.id===clientId?'selected':''}>${esc(c.nombre)} (${c.tipo==='comercio'?'comercio':'persona'})</option>`).join('')}</select>
   <label>Tipo de préstamo</label>
   <div class="seg" id="p-tipo">
@@ -1614,10 +1671,11 @@ function formPrestamo(clientId,preset){
   </div>
   <div class="hint">La fecha del primer cobro se sugiere sola, pero podés cambiarla a mano. Después, dentro del préstamo, también podés editar la fecha de cualquier cuota con el botón 📅.</div>
   <label>Reparto de ganancia</label>
-  <div class="seg" id="p-reparto">
+  ${esSocio()?`<div class="resume">Este préstamo queda a tu nombre (${esc(SESSION.nombre)}). Te corresponde el <b>${socioPct(SESSION.socioId)}%</b> de la ganancia.</div>`
+  :`<div class="seg" id="p-reparto">
     <button data-v="0" class="on">Toda para mí</button>
     <button data-v="1">Compartir con socio</button>
-  </div>
+  </div>`}
   <div id="p-sociobox" style="display:none">
     <div class="frow" style="margin-top:10px">
       <div><label>Socio gestor</label>
@@ -1641,7 +1699,12 @@ function formPrestamo(clientId,preset){
     const cs=genCuotas(total,n,f,$('#p-inicio').value||hoy,f==='diaria'&&skipSun);
     const ganancia=total-m;
     let repartoTxt='';
-    if(compartir){
+    if(esSocio()){
+      const sp=socioPct(SESSION.socioId), mp=100-sp;
+      repartoTxt=`<br>Ganancia: <b>${fmt$(ganancia)}</b>`
+        +`<br>· Tu parte (${sp}%): <b>${fmt$(Math.round(ganancia*sp/100))}</b>`
+        +`<br>· Del dueño (${mp}%): <b>${fmt$(Math.round(ganancia*mp/100))}</b>`;
+    }else if(compartir){
       const sel=$('#p-socio'), nom=sel&&sel.value!=='__nuevo__'&&sel.selectedOptions.length?sel.selectedOptions[0].textContent:'Socio';
       const sp=Math.max(0,Math.min(100,+$('#p-sociopct').value||0)), mp=100-sp;
       repartoTxt=`<br>Ganancia: <b>${fmt$(ganancia)}</b>`
@@ -1662,7 +1725,7 @@ function formPrestamo(clientId,preset){
     if(!fechaManual){$('#p-inicio').value=fechaPrimerCobro($('#p-freq').value);upd();}});
   $('#p-sun').addEventListener('click',()=>setTimeout(upd,0));
   $$('#p-tipo button').forEach(b=>b.addEventListener('click',upd));
-  $$('#p-reparto button').forEach(b=>b.onclick=()=>{
+  if(!esSocio())$$('#p-reparto button').forEach(b=>b.onclick=()=>{
     compartir=b.dataset.v==='1';
     $$('#p-reparto button').forEach(x=>x.classList.toggle('on',x===b));
     if(compartir&&!(S.settings.socios||[]).length){
@@ -1674,7 +1737,7 @@ function formPrestamo(clientId,preset){
     }
     $('#p-sociobox').style.display=compartir?'':'none';upd();
   });
-  $('#p-socio').addEventListener('change',e=>{
+  if(!esSocio())$('#p-socio').addEventListener('change',e=>{
     if(e.target.value==='__nuevo__'){
       const nom=prompt('Nombre del nuevo socio:');
       if(nom&&nom.trim()){
@@ -1685,7 +1748,7 @@ function formPrestamo(clientId,preset){
     }
     upd();
   });
-  $('#p-sociopct').addEventListener('input',upd);
+  if(!esSocio())$('#p-sociopct').addEventListener('input',upd);
   if(preset){ // valores traídos del simulador
     if(preset.monto!=null)$('#p-monto').value=preset.monto;
     if(preset.interes!=null)$('#p-int').value=preset.interes;
@@ -1703,7 +1766,9 @@ function formPrestamo(clientId,preset){
     const l={id:uid(),clientId:$('#p-cli').value,tipo,monto:m,interes:i,total,
       frecuencia:f,inicio:ini,cuotas:genCuotas(total,n,f,ini,f==='diaria'&&skipSun),
       status:'activo',createdAt:Date.now()};
-    if(compartir){
+    if(esSocio()){ // un socio siempre crea préstamos a su nombre
+      l.gestorId=SESSION.socioId; l.gestorPct=socioPct(SESSION.socioId); l.gestorNombre=socioNombre(SESSION.socioId);
+    }else if(compartir){
       const sid=$('#p-socio').value;
       if(!sid||sid==='__nuevo__')return alert('Elegí o agregá el socio que gestiona el préstamo');
       const sp=Math.max(0,Math.min(100,+$('#p-sociopct').value||0));
@@ -2094,10 +2159,49 @@ async function checkAuth(user,pass){
   const a=getAuth();if(!a)return false;
   return a.user.toLowerCase()===user.toLowerCase()&&a.hash===await hashPass(pass,a.salt);
 }
-function unlockApp(){
+/* ----- accesos de socios: viajan en los ajustes, así valen en todos los dispositivos ----- */
+const cuentasSocio=()=>(S.settings.cuentas||[]);
+async function setCuentaSocio(socioId,user,pass){
+  const salt=uid()+uid(), hash=await hashPass(pass,salt);
+  const l=cuentasSocio().filter(c=>c.socioId!==socioId);
+  l.push({socioId,user:user.trim(),salt,hash});
+  S.settings.cuentas=l; saveSettings();
+}
+function quitarCuentaSocio(socioId){
+  S.settings.cuentas=cuentasSocio().filter(c=>c.socioId!==socioId); saveSettings();
+}
+async function buscarCuentaSocio(user,pass){ // devuelve la cuenta del socio si coinciden usuario y clave
+  const u=(user||'').trim().toLowerCase();
+  for(const c of cuentasSocio()){
+    if(c.user.toLowerCase()===u&&c.hash===await hashPass(pass,c.salt))return c;
+  }
+  return null;
+}
+function unlockApp(sesion){
+  if(sesion){SESSION=sesion;sessionStorage.setItem('pc-sesion',JSON.stringify(sesion));}
   UNLOCKED=true;sessionStorage.setItem('pc-unlocked','1');
   $('#lock').classList.remove('show');$('#lock').innerHTML='';
-  applyBiz();render();fbConnect();
+  aplicarRol(); applyBiz();render();fbConnect();
+}
+function aplicarRol(){ // el socio no ve las pantallas de administración del negocio
+  const t=document.querySelector('.tabs button[data-v="ajustes"] .i');
+  if(t)t.textContent=esSocio()?'👤':'⚙️';
+  const lbl=document.querySelector('.tabs button[data-v="ajustes"]');
+  if(lbl)lbl.childNodes[1].nodeValue=esSocio()?'Mi cuenta':'Ajustes';
+}
+function conectarDesdeLogin(){ // para un socio (o un dispositivo nuevo) que todavía no bajó los datos
+  const raw=prompt('Pegá la configuración de Firebase que te pasó el dueño (el bloque que empieza con {):');
+  if(!raw)return;
+  let cfg;
+  try{const m=raw.match(/\{[\s\S]*\}/);if(!m)throw 0;cfg=(new Function('return ('+m[0]+')'))();
+    if(!cfg.projectId||!cfg.apiKey)throw 0;}
+  catch(e){return alert('La configuración no es válida. Pedile al dueño el bloque completo con las llaves { }.');}
+  const code=prompt('Ahora pegá el código de negocio (el mismo que usa el dueño):');
+  if(!code||!code.trim())return;
+  localStorage.setItem(LS+'-fb',JSON.stringify({config:cfg,code:code.trim()}));
+  alert('Conectando… Cuando termine de bajar los datos vas a poder entrar con el usuario y la contraseña que te dieron.');
+  fbConnect();
+  setTimeout(()=>{if(!UNLOCKED)showLock();},4000); // refresca la pantalla ya con los accesos bajados
 }
 function showLock(){
   UNLOCKED=false;sessionStorage.removeItem('pc-unlocked');
@@ -2105,7 +2209,8 @@ function showLock(){
   $$('.cview').forEach(v=>v.remove()); // ni el visor de contratos (datos del cliente)
   const a=getAuth(),lk=$('#lock');
   lk.classList.add('show');
-  if(!a){
+  const hayCuentas=cuentasSocio().length>0;
+  if(!a&&!hayCuentas){
     lk.innerHTML=`<div class="lockbox">
       <div class="logo"><div class="ic">💰</div><h1>PrestaControl</h1><div class="sub">Creá tu acceso privado</div></div>
       <label>Elegí un usuario</label><input id="lk-user" autocomplete="username">
@@ -2114,14 +2219,16 @@ function showLock(){
       <div class="hint">⚠️ Guardala bien: si la olvidás, la única salida es borrar los datos de este dispositivo (lo sincronizado en la nube se recupera reconectando).</div>
       <button class="btn" id="lk-create" style="margin-top:16px">Crear cuenta</button>
       <div class="lockerr" id="lk-err"></div>
+      <div class="lockfoot"><button id="lk-sync">¿Te dieron un acceso? Conectá el negocio</button></div>
     </div>`;
     $('#lk-create').onclick=async()=>{
       const u=$('#lk-user').value.trim(),p=$('#lk-pass').value,p2=$('#lk-pass2').value;
       if(!u)return $('#lk-err').textContent='Elegí un usuario';
       if(p.length<4)return $('#lk-err').textContent='La contraseña debe tener al menos 4 caracteres';
       if(p!==p2)return $('#lk-err').textContent='Las contraseñas no coinciden';
-      await setAuth(u,p);unlockApp();
+      await setAuth(u,p);unlockApp({rol:'dueno',socioId:null,nombre:u});
     };
+    $('#lk-sync').onclick=conectarDesdeLogin;
   }else{
     lk.innerHTML=`<div class="lockbox">
       <div class="logo"><div class="ic">🔒</div><h1>PrestaControl</h1><div class="sub">Acceso privado</div></div>
@@ -2129,13 +2236,20 @@ function showLock(){
       <label>Contraseña</label><input id="lk-pass" type="password" autocomplete="current-password">
       <button class="btn" id="lk-go" style="margin-top:16px">🔓 Ingresar</button>
       <div class="lockerr" id="lk-err"></div>
-      <div class="lockfoot"><button id="lk-forgot">¿Olvidaste tu contraseña?</button></div>
+      <div class="lockfoot"><button id="lk-forgot">¿Olvidaste tu contraseña?</button>${!a?' · <button id="lk-sync">Conectar otro negocio</button>':''}</div>
     </div>`;
     const go=async()=>{
-      if(await checkAuth($('#lk-user').value.trim(),$('#lk-pass').value))unlockApp();
-      else{$('#lk-err').textContent='Usuario o contraseña incorrectos';$('#lk-pass').value='';}
+      const u=$('#lk-user').value.trim(),p=$('#lk-pass').value;
+      if(a&&await checkAuth(u,p))return unlockApp({rol:'dueno',socioId:null,nombre:u});
+      const cta=await buscarCuentaSocio(u,p); // acceso de socio creado por el dueño
+      if(cta){
+        const soc=(S.settings.socios||[]).find(x=>x.id===cta.socioId);
+        return unlockApp({rol:'socio',socioId:cta.socioId,nombre:soc?soc.nombre:u});
+      }
+      $('#lk-err').textContent='Usuario o contraseña incorrectos';$('#lk-pass').value='';
     };
     $('#lk-go').onclick=go;
+    {const b=$('#lk-sync');if(b)b.onclick=conectarDesdeLogin;}
     $('#lk-pass').onkeydown=e=>{if(e.key==='Enter')go();};
     $('#lk-user').focus();
     $('#lk-forgot').onclick=()=>{
@@ -2145,6 +2259,60 @@ function showLock(){
         location.reload();}
     };
   }
+}
+async function buscarActualizacion(){
+  const bu=$('#buscar-upd');
+  if(!('serviceWorker' in navigator))return alert('No disponible en este navegador.');
+  const reg=await navigator.serviceWorker.getRegistration();
+  if(!reg)return alert('Recargá la página e intentá de nuevo.');
+  if(bu){bu.textContent='⏳ Buscando…';bu.disabled=true;}
+  let nueva=false;
+  reg.addEventListener('updatefound',()=>{nueva=true;});
+  try{await reg.update();}catch(e){}
+  setTimeout(()=>{
+    if(nueva||reg.waiting){alert('¡Hay una versión nueva! La app se va a recargar para instalarla.');location.reload();}
+    else{alert('Ya estás en la última versión (v'+APP_VER+') ✅');
+      if(bu){bu.textContent='🔁 Buscar actualización';bu.disabled=false;}}
+  },1500);
+}
+function formAccesoSocio(socioId){ // el dueño crea o cambia el usuario/clave de un socio
+  const soc=(S.settings.socios||[]).find(x=>x.id===socioId);if(!soc)return;
+  const cta=cuentasSocio().find(c=>c.socioId===socioId);
+  modal(`<h3>🔑 Acceso de ${esc(soc.nombre)}</h3>
+  <div class="hint">Con estos datos ${esc(soc.nombre)} entra desde su celular y ve <b>solo sus clientes, sus préstamos y su parte de la ganancia</b>. No puede tocar los ajustes del negocio ni ver el resto de tu cartera.</div>
+  <label>Usuario</label><input id="ac-user" value="${esc(cta?cta.user:'')}" placeholder="ej: monica">
+  <label>Contraseña</label><input id="ac-pass" type="text" placeholder="mínimo 4 caracteres">
+  <div class="hint">Se muestra en texto para que se la puedas pasar. Después ${esc(soc.nombre)} puede cambiarla desde su cuenta.</div>
+  <button class="btn" id="ac-save" style="margin-top:16px">Guardar acceso</button>
+  ${cta?'<div class="hint" style="margin-top:12px">Ya tiene un acceso creado. Si lo cambiás, tendrá que entrar con los datos nuevos.</div>':''}`);
+  $('#ac-save').onclick=async()=>{
+    const u=$('#ac-user').value.trim(),p=$('#ac-pass').value;
+    if(!u)return alert('Poné un usuario');
+    if(p.length<4)return alert('La contraseña debe tener al menos 4 caracteres');
+    if(getAuth()&&getAuth().user.toLowerCase()===u.toLowerCase())return alert('Ese usuario es el tuyo. Elegí otro distinto para el socio.');
+    await setCuentaSocio(socioId,u,p);
+    closeModal();render();
+    const fb=fbCfg();
+    alert('Acceso creado ✅\n\nPasale a '+soc.nombre+':\n\n1) El link de la app\n2) Usuario: '+u+'\n3) Contraseña: '+p
+      +(fb?'\n4) La configuración de Firebase y el código de negocio (para que sincronice)':'\n\n⚠️ Todavía no tenés la sincronización activada: sin ella, el socio no puede entrar desde otro dispositivo.'));
+  };
+}
+function formCambiarClaveSocio(){
+  const cta=cuentasSocio().find(c=>c.socioId===SESSION.socioId);
+  if(!cta)return alert('No se encontró tu acceso.');
+  modal(`<h3>Cambiar mi contraseña</h3>
+  <label>Contraseña actual</label><input id="mc-old" type="password">
+  <label>Nueva contraseña</label><input id="mc-new" type="password">
+  <label>Repetí la nueva</label><input id="mc-new2" type="password">
+  <button class="btn" id="mc-save" style="margin-top:16px">Guardar</button>`);
+  $('#mc-save').onclick=async()=>{
+    if(!(await buscarCuentaSocio(cta.user,$('#mc-old').value)))return alert('La contraseña actual es incorrecta');
+    const p=$('#mc-new').value;
+    if(p.length<4)return alert('La nueva contraseña debe tener al menos 4 caracteres');
+    if(p!==$('#mc-new2').value)return alert('Las contraseñas nuevas no coinciden');
+    await setCuentaSocio(SESSION.socioId,cta.user,p);
+    closeModal();alert('Contraseña actualizada ✅');
+  };
 }
 function formCambiarClave(){
   modal(`<h3>Cambiar usuario o contraseña</h3>
@@ -2263,6 +2431,22 @@ function bindView(){
     $('#docfile').onchange=e=>{if(e.target.files.length)subirDocs(DETAIL,[...e.target.files]);};}
 
   // ajustes
+  // pantalla reducida del socio
+  {const mc=$('#mc-clave');
+   if(mc){mc.onclick=formCambiarClaveSocio;
+     const sl=$('#sec-lock');if(sl)sl.onclick=showLock;
+     const bu=$('#buscar-upd');if(bu)bu.onclick=buscarActualizacion;}}
+  // administración de accesos de socios (solo el dueño)
+  $$('[data-acceso]').forEach(b=>b.onclick=()=>formAccesoSocio(b.dataset.acceso));
+  $$('[data-socpct]').forEach(b=>b.onclick=()=>{
+    const soc=(S.settings.socios||[]).find(x=>x.id===b.dataset.socpct);if(!soc)return;
+    const v=prompt('¿Qué porcentaje de la ganancia le corresponde a '+soc.nombre+'?',soc.pct!=null?soc.pct:50);
+    if(v===null)return;
+    soc.pct=Math.max(0,Math.min(100,+v||0));saveSettings();render();});
+  $$('[data-quitaracceso]').forEach(b=>b.onclick=()=>{
+    const soc=(S.settings.socios||[]).find(x=>x.id===b.dataset.quitaracceso);
+    if(!confirm('¿Quitarle el acceso a la app a '+(soc?soc.nombre:'este socio')+'?\nSus clientes y préstamos no se tocan.'))return;
+    quitarCuentaSocio(b.dataset.quitaracceso);render();});
   const sv=$('#set-save');
   if(sv){
     let moratipo=S.settings.mora.tipo,porDia=S.settings.mora.porDia;
@@ -2320,25 +2504,14 @@ function bindView(){
       localStorage.removeItem(LS);
       try{if(_idb)_idb.close();indexedDB.deleteDatabase('prestacontrol');}catch(e){}
       location.reload();};
-    const bu=$('#buscar-upd');if(bu)bu.onclick=async()=>{
-      if(!('serviceWorker' in navigator))return alert('No disponible en este navegador.');
-      const reg=await navigator.serviceWorker.getRegistration();
-      if(!reg)return alert('Recargá la página e intentá de nuevo.');
-      bu.textContent='⏳ Buscando…';bu.disabled=true;
-      let nueva=false;
-      reg.addEventListener('updatefound',()=>{nueva=true;});
-      try{await reg.update();}catch(e){}
-      setTimeout(()=>{
-        if(nueva||reg.waiting){alert('¡Hay una versión nueva! La app se va a recargar para instalarla.');location.reload();}
-        else{alert('Ya estás en la última versión (v'+APP_VER+') ✅');bu.textContent='🔁 Buscar actualización';bu.disabled=false;}
-      },1500);
-    };
+    const bu=$('#buscar-upd');if(bu)bu.onclick=buscarActualizacion;
   }
 }
 
 /* ================= INIT ================= */
 applyBiz();
-if(getAuth()&&sessionStorage.getItem('pc-unlocked')==='1')unlockApp();
+fbConnect(); // conectamos antes del login para conocer los accesos de socios creados en otro dispositivo
+if(sessionStorage.getItem('pc-unlocked')==='1'&&(getAuth()||esSocio()))unlockApp();
 else showLock();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 </script>
