@@ -72,6 +72,8 @@
   .item .m2{font-size:11px;color:var(--muted);margin-top:2px}
   .chev{font-size:11px;color:var(--muted);margin-left:2px}
   .clip{color:var(--blue);cursor:pointer;font-weight:600}
+  .undo{display:inline-block;color:var(--red);cursor:pointer;font-weight:800;padding:0 6px;
+    border:1px solid rgba(255,93,93,.35);border-radius:6px;line-height:1.5;margin-left:2px}
   .balgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:12px}
   .balgrid .bn{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
   .balgrid .bl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.3px}
@@ -263,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=47; // mantener a la par del número de caché en sw.js
+const APP_VER=48; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -838,7 +840,8 @@ function vPrestamo(id){
       :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>')
       +(parcial&&!esRenov?'<span class="badge b-cob">parcial</span>':'');
     const pagosTxt=(c.pagos||[]).map(p=>fmt$((p.monto||0)+(p.mora||0)+(p.cobrador||0))+' el '+new Date(p.t).toLocaleDateString('es-AR',{day:'numeric',month:'short'})
-      +(p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` <span class="clip" data-doc="${p.comprobante}">📎 comprobante</span>`:'')).join(', ');
+      +(p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` <span class="clip" data-doc="${p.comprobante}">📎 comprobante</span>`:'')
+      +(esRenov?'':` <span class="undo" data-undo="${l.id}|${c.n}|${p.t}" title="deshacer este cobro">✕</span>`)).join(', ');
     return `<div class="cuota ${cls}">
       <div class="num">${c.n}</div>
       <div class="mid" style="flex:1;min-width:0">
@@ -1372,7 +1375,8 @@ function vCalendario(){
         <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
         <div class="mid"><div class="t1">${esc(cl.nombre)}${l.status==='renovado'?' <span class="badge b-com">renovado</span>':''}</div>
           <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${new Date(p.t).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} hs${extras.length?' · '+extras.join(' · '):''}
-          ${p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` · <span class="clip" data-doc="${p.comprobante}">📎</span>`:''}</div></div>
+          ${p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` · <span class="clip" data-doc="${p.comprobante}">📎</span>`:''}
+          ${l.status==='renovado'?'':` · <span class="undo" data-undo="${l.id}|${c.n}|${p.t}" title="deshacer este cobro">✕ deshacer</span>`}</div></div>
         <div class="end"><div class="m1" style="color:var(--green)">${fmt$(tot)}</div><div class="m2">cobrado</div></div>
       </div>`;}).join('')}</div>`;})()}`;
 }
@@ -1876,6 +1880,24 @@ function formFecha(loanId,nCuota){
   };
 }
 
+function deshacerCobro(loanId,nCuota,tPago){
+  const l=loan(loanId);if(!l)return;
+  const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
+  const i=(c.pagos||[]).findIndex(p=>p.t===tPago);if(i<0)return;
+  const p=c.pagos[i], total=(p.monto||0)+(p.mora||0)+(p.cobrador||0);
+  const partes=[];
+  if(p.monto>0)partes.push('cuota '+fmt$(p.monto));
+  if(p.mora>0)partes.push('mora '+fmt$(p.mora));
+  if(p.cobrador>0)partes.push('cobrador '+fmt$(p.cobrador));
+  const fecha=new Date(p.t).toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'});
+  if(!confirm(`¿Deshacer este cobro?\n\n${fmt$(total)} registrado el ${fecha}\n(${partes.join(' · ')})\n\nEsa plata vuelve a quedar pendiente y la mora se recalcula.`))return;
+  const doc=p.comprobante?S.docs.find(d=>d.id===p.comprobante):null;
+  c.pagos.splice(i,1);
+  if(doc&&confirm('¿Borrar también el comprobante adjunto a ese cobro?'))delEntity('doc',doc);
+  saveLoan(l); // recalcula el estado del préstamo (si estaba pagado, vuelve a activo)
+  render();
+  alert('Cobro deshecho ✅\nQuedan '+fmt$(cRestante(c))+' pendientes de esta cuota.');
+}
 function formCobro(loanId,nCuota){
   const l=loan(loanId);if(!l)return;
   const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
@@ -2198,6 +2220,8 @@ function bindView(){
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
   $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.fecha.split('|');formFecha(id,+n);});
+  $$('[data-undo]').forEach(b=>b.onclick=e=>{e.stopPropagation();
+    const[id,n,t]=b.dataset.undo.split('|');deshacerCobro(id,+n,+t);});
   $$('[data-reparto]').forEach(b=>b.onclick=()=>formReparto(b.dataset.reparto));
   $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
   $$('[data-vs]').forEach(b=>b.onclick=()=>{vencSort=b.dataset.vs;render();});
