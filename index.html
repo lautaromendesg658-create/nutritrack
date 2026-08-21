@@ -265,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=49; // mantener a la par del número de caché en sw.js
+const APP_VER=50; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -413,6 +413,16 @@ function socioPct(id){const s=(S.settings.socios||[]).find(x=>x.id===id);return 
 function socioNombre(id){
   const s=(S.settings.socios||[]).find(x=>x.id===id);
   return s?s.nombre:null;
+}
+// mueve TODOS los préstamos de un cliente al socio elegido (o los devuelve al dueño si gestorId es null)
+function reasignarPrestamosDeCliente(clientId,gestorId){
+  const ls=S.loans.filter(l=>l.clientId===clientId);
+  ls.forEach(l=>{
+    if(gestorId){l.gestorId=gestorId;l.gestorPct=socioPct(gestorId);l.gestorNombre=socioNombre(gestorId);}
+    else{delete l.gestorId;delete l.gestorPct;delete l.gestorNombre;}
+    saveLoan(l);
+  });
+  return ls.length;
 }
 function loanReparto(l){ // devuelve {socioNom, socioPct, miPct, gananciaTotal, miParte, socioParte, realizada{...}}
   const g=loanGananciaProyectada(l), gr=loanGananciaRealizada(l);
@@ -720,7 +730,8 @@ function vCliente(id){
       ${c.dni?' DNI/CUIT '+esc(c.dni):''}</div>
       <div class="t2">${esc(c.telefono||'')}${c.direccion?' · '+esc(c.direccion):''}</div>
       ${c.facebook?`<div class="t2">🔵 <a href="${esc(fbUrl(c.facebook))}" target="_blank" style="color:var(--blue)">Perfil de Facebook</a></div>`:''}
-      ${c.notas?`<div class="t2">📝 ${esc(c.notas)}</div>`:''}</div>
+      ${c.notas?`<div class="t2">📝 ${esc(c.notas)}</div>`:''}
+      ${!esSocio()&&c.gestorId&&socioNombre(c.gestorId)?`<div class="t2">🤝 Gestionado por <b>${esc(socioNombre(c.gestorId))}</b></div>`:''}</div>
   </div></div>
   <div class="btnrow">
     ${tel?`<button class="btn sec" data-wa="${tel}"><span class="wamsg">🟢 WhatsApp</span></button>`:''}
@@ -1483,15 +1494,16 @@ function vAjustes(){
   <div class="list" style="padding:4px 14px 16px">
     <div class="hint" style="margin-top:10px">Agregá a las personas que gestionan clientes y se reparten la ganancia con vos. Podés darles <b>acceso a la app</b>: entran con su usuario y ven únicamente sus clientes, sus préstamos y su parte de la ganancia.</div>
     <div id="socios-list" style="margin-top:6px">
-      ${(st.socios||[]).length?(st.socios||[]).map(s=>`<div class="item" style="cursor:default;padding-left:0;padding-right:0">
+      ${(st.socios||[]).length?(st.socios||[]).map(s=>{const cta=cuentasSocio().find(c=>c.socioId===s.id);return `<div class="item" style="cursor:default;padding-left:0;padding-right:0">
         <div class="ava">${esc(ini(s.nombre))}</div>
-        <div class="mid"><div class="t1">${esc(s.nombre)} <span class="badge ${cuentasSocio().some(c=>c.socioId===s.id)?'b-ok':'b-fut'}">${cuentasSocio().some(c=>c.socioId===s.id)?'con acceso':'sin acceso'}</span></div>
-          <div class="t2">${S.loans.filter(l=>l.gestorId===s.id).length} préstamo(s) · le toca el ${s.pct!=null?s.pct:50}% de la ganancia</div>
-          <div class="t2"><span class="clip" data-acceso="${s.id}">🔑 ${cuentasSocio().some(c=>c.socioId===s.id)?'cambiar acceso':'dar acceso a la app'}</span>
+        <div class="mid"><div class="t1">${esc(s.nombre)} <span class="badge ${cta?'b-ok':'b-fut'}">${cta?'con acceso':'sin acceso'}</span></div>
+          <div class="t2">${S.clients.filter(c=>c.gestorId===s.id).length} cliente(s) · ${S.loans.filter(l=>l.gestorId===s.id).length} préstamo(s) · le toca el ${s.pct!=null?s.pct:50}% de la ganancia</div>
+          ${cta?`<div class="t2">👤 Usuario: <b>${esc(cta.user)}</b> · la contraseña no se puede ver (queda encriptada); si se pierde, poné una nueva desde 🔑</div>`:''}
+          <div class="t2"><span class="clip" data-acceso="${s.id}">🔑 ${cta?'cambiar acceso':'dar acceso a la app'}</span>
             · <span class="clip" data-socpct="${s.id}">✏️ cambiar %</span>
-            ${cuentasSocio().some(c=>c.socioId===s.id)?` · <span class="undo" data-quitaracceso="${s.id}">quitar acceso</span>`:''}</div></div>
+            ${cta?` · <span class="undo" data-quitaracceso="${s.id}">quitar acceso</span>`:''}</div></div>
         <button class="btn red mini" data-del-socio="${s.id}">🗑</button>
-      </div>`).join(''):'<div class="empty" style="padding:18px">Todavía no agregaste socios</div>'}
+      </div>`;}).join(''):'<div class="empty" style="padding:18px">Todavía no agregaste socios</div>'}
     </div>
     <div class="frow" style="margin-top:10px">
       <div style="flex:2"><input id="socio-nombre" placeholder="Nombre del socio"></div>
@@ -1577,7 +1589,7 @@ function formCliente(id){
   ${esSocio()?'':`<label>Gestionado por</label>
   <select id="f-gestor"><option value="">Yo (el dueño)</option>
     ${(S.settings.socios||[]).map(x=>`<option value="${x.id}" ${c.gestorId===x.id?'selected':''}>${esc(x.nombre)}</option>`).join('')}</select>
-  <div class="hint">Si lo asignás a un socio, ese cliente aparece en su cuenta.</div>`}
+  <div class="hint">Si lo asignás a un socio, ese cliente aparece en su cuenta. Si el cliente ya tenía préstamos cargados, la app te va a preguntar si también se los pasás.</div>`}
   <button class="btn" id="f-save" style="margin-top:18px">Guardar cliente</button>`);
   let tipo=c.tipo||'persona';
   $$('#f-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
@@ -1589,9 +1601,26 @@ function formCliente(id){
     Object.assign(obj,{nombre,tipo,telefono:$('#f-tel').value.trim(),dni:$('#f-dni').value.trim(),
       direccion:$('#f-dir').value.trim(),facebook:$('#f-fb').value.trim(),notas:$('#f-notas').value.trim()});
     // el socio solo puede crear clientes suyos; el dueño elige a quién asignarlo
+    const gestorAntes=c.gestorId||null;
     if(esSocio())obj.gestorId=SESSION.socioId;
     else{const g=$('#f-gestor');obj.gestorId=g&&g.value?g.value:null;}
-    saveClient(obj);closeModal();go('clientes',obj.id);
+    saveClient(obj);
+    // si el dueño cambió de gestor, los préstamos que ya tenía ese cliente NO se mueven solos:
+    // se los ofrecemos, porque si no el socio ve el cliente pero sin ninguno de sus préstamos
+    if(id&&!esSocio()&&obj.gestorId!==gestorAntes){
+      const pend=S.loans.filter(l=>l.clientId===obj.id&&l.gestorId!==(obj.gestorId||undefined));
+      if(pend.length){
+        const nom=obj.gestorId?socioNombre(obj.gestorId):null;
+        const msg=obj.gestorId
+          ?`Este cliente ya tiene ${pend.length} préstamo(s) cargado(s).\n\n¿Pasárselos también a ${nom} (${socioPct(obj.gestorId)}% de la ganancia para el socio)?\n\nSi decís que no, ${nom} va a ver al cliente pero sin esos préstamos.`
+          :`Este cliente ya tiene ${pend.length} préstamo(s) asignado(s) a un socio.\n\n¿Pasarlos también a tu nombre y sacarles el reparto de ganancia?`;
+        if(confirm(msg)){
+          const n=reasignarPrestamosDeCliente(obj.id,obj.gestorId);
+          alert(`Listo ✅\n${n} préstamo(s) ${obj.gestorId?'quedaron a nombre de '+nom:'volvieron a tu nombre'}.`);
+        }
+      }
+    }
+    closeModal();go('clientes',obj.id);
   };
 }
 
@@ -1749,6 +1778,23 @@ function formPrestamo(clientId,preset){
     upd();
   });
   if(!esSocio())$('#p-sociopct').addEventListener('input',upd);
+  // si el cliente elegido está gestionado por un socio, el reparto viene ya marcado con ese socio y su %
+  let repartoManual=false;
+  if(!esSocio()){
+    $$('#p-reparto button').forEach(b=>b.addEventListener('click',()=>repartoManual=true));
+    const aplicarGestorDelCliente=()=>{
+      if(repartoManual)return;
+      const cl=client($('#p-cli').value), g=cl&&cl.gestorId;
+      const existe=g&&(S.settings.socios||[]).some(s=>s.id===g);
+      compartir=!!existe;
+      if(existe){$('#p-socio').value=g;$('#p-sociopct').value=socioPct(g);}
+      $$('#p-reparto button').forEach(x=>x.classList.toggle('on',x.dataset.v===(compartir?'1':'0')));
+      $('#p-sociobox').style.display=compartir?'':'none';
+      upd();
+    };
+    $('#p-cli').addEventListener('change',aplicarGestorDelCliente);
+    aplicarGestorDelCliente();
+  }
   if(preset){ // valores traídos del simulador
     if(preset.monto!=null)$('#p-monto').value=preset.monto;
     if(preset.interes!=null)$('#p-int').value=preset.interes;
