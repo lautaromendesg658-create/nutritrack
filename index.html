@@ -265,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=53; // mantener a la par del número de caché en sw.js
+const APP_VER=54; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1142,19 +1142,27 @@ let recFilter='hoy';
 function formRecordatorios(){
   const tipos=[['hoy','Vencen hoy'],['manana','Vencen mañana'],['vencido','Vencidos']];
   const lista=recLista(recFilter), avis=avisadosSet();
+  const totalLista=lista.reduce((a,{c})=>a+cRestante(c)+moraDe(c)+cobradorDe(c),0);
   modal(`<h3>🔔 Recordatorios</h3>
-  <div class="hint">Tocá "Avisar" y se abre WhatsApp con el mensaje listo. Los mensajes se editan en Ajustes › Recordatorios.</div>
+  <div class="hint">"Avisar" abre WhatsApp con el mensaje listo. "Cobrar" registra el pago sin salir de acá: cuando lo guardás, volvés a esta lista y el cliente ya no aparece. Los mensajes se editan en Ajustes › Recordatorios.</div>
   <div class="chips" style="margin-top:12px">
     ${tipos.map(([k,t])=>`<button class="${recFilter===k?'on':''}" data-rf="${k}">${t} (${recLista(k).length})</button>`).join('')}
   </div>
+  ${lista.length?`<div class="resume" style="margin-top:10px">${lista.length} cuota${lista.length===1?'':'s'} · total a cobrar <b>${fmt$(totalLista)}</b></div>`:''}
   <div class="list">${lista.length?lista.map(({l,c})=>{
     const cl=client(l.clientId)||{nombre:'?'}, tel=(cl.telefono||'').replace(/\D/g,'');
     const key=l.id+'|'+c.n, ya=avis.has(key), total=cRestante(c)+moraDe(c)+cobradorDe(c);
+    const extra=moraDe(c)+cobradorDe(c);
     return `<div class="item" style="cursor:default">
       <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
       <div class="mid"><div class="t1">${esc(cl.nombre)} ${ya?'<span class="badge b-ok">✓ avisado</span>':''}</div>
-        <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${fmt$(total)}${recFilter==='vencido'?' · vencía '+dShort(c.vence):''}</div></div>
-      ${tel?`<button class="btn green mini" data-avisar="${key}">Avisar</button>`:'<span class="t2" style="flex-shrink:0">sin tel.</span>'}
+        <div class="t2">Cuota ${c.n}/${l.cuotas.length} · <b>${fmt$(total)}</b>${recFilter==='vencido'?' · vencía '+dShort(c.vence):''}</div>
+        ${extra>0?`<div class="t2" style="color:var(--orange)">incluye ${fmt$(extra)} de mora${cobradorDe(c)>0?' y cobrador':''}</div>`:''}
+        ${tel?'':'<div class="t2">sin teléfono cargado</div>'}</div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+        ${tel?`<button class="btn green mini" data-avisar="${key}">Avisar</button>`:''}
+        <button class="btn mini" data-reccobrar="${key}" style="background:var(--gold);color:#14110a;white-space:nowrap">💵 Cobrar</button>
+      </div>
     </div>`;}).join(''):'<div class="empty">No hay clientes en esta lista 🎉</div>'}</div>`);
   $$('[data-rf]').forEach(b=>b.onclick=()=>{recFilter=b.dataset.rf;formRecordatorios();});
   $$('[data-avisar]').forEach(b=>b.onclick=()=>{
@@ -1162,6 +1170,11 @@ function formRecordatorios(){
     if(!l||!c)return; const cl=client(l.clientId)||{};
     waOpen(cl.telefono,recMsg(recFilter,l,c));
     avisadosMark(b.dataset.avisar); formRecordatorios();
+  });
+  // cobrar sin salir del panel: al terminar (o al cerrar) se vuelve a esta misma lista
+  $$('[data-reccobrar]').forEach(b=>b.onclick=()=>{
+    const[id,n]=b.dataset.reccobrar.split('|');
+    formCobro(id,+n,()=>formRecordatorios());
   });
 }
 
@@ -2276,7 +2289,8 @@ function deshacerCobro(loanId,nCuota,tPago){
   render();
   alert('Cobro deshecho ✅\nQuedan '+fmt$(cRestante(c))+' pendientes de esta cuota.');
 }
-function formCobro(loanId,nCuota){
+// alVolver: si viene, se ejecuta al terminar o al cerrar (para volver al panel de recordatorios)
+function formCobro(loanId,nCuota,alVolver){
   const l=loan(loanId);if(!l)return;
   const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
   const cl=client(l.clientId)||{nombre:'?'};
@@ -2311,6 +2325,11 @@ function formCobro(loanId,nCuota){
     <button class="btn sec" id="co-alias">📋 Copiar alias</button>
   </div>
   <button class="btn green" id="co-save" style="margin-top:16px">✅ Registrar cobro</button>`);
+  if(alVolver){ // la ✕ y el fondo vuelven al panel en vez de dejarte en la nada
+    const volver=()=>{closeModal();alVolver();};
+    $('#mx').onclick=volver;
+    $('#ovl').onclick=e=>{if(e.target.id==='ovl')volver();};
+  }
   let moraACobrar=mora;
   // reparte lo que te pagó: primero la mora, después el cobrador, y lo que sobra a la cuota
   const repartir=r=>{
@@ -2395,6 +2414,7 @@ function formCobro(loanId,nCuota){
         `Saldo restante del préstamo: ${fmt$(loanRestante(l))}. ¡Gracias! — ${S.settings.nombreNegocio}`;
       window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
     }else if(!tel&&queda>0)alert(`Pago parcial registrado ✅\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).`);
+    if(alVolver)alVolver(); // vuelve al panel de recordatorios para seguir con el siguiente
   };
 }
 
