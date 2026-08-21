@@ -265,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=50; // mantener a la par del número de caché en sw.js
+const APP_VER=51; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -289,17 +289,22 @@ function normSettings(st){st=st||{};
     socios:st.socios||[],
     recordatorios:{...DEF_REC,...(st.recordatorios||{})}};
 }
-let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[]};
+let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[], trash:[]};
 try{const raw=localStorage.getItem(LS); if(raw){const p=JSON.parse(raw);
   S={settings:normSettings(p.settings),
-    clients:p.clients||[], loans:p.loans||[], docs:p.docs||[]};}}catch(e){}
+    clients:p.clients||[], loans:p.loans||[], docs:p.docs||[], trash:p.trash||[]};}}catch(e){}
 
 // Los documentos (imágenes) viven en IndexedDB, que tiene mucho más espacio que
 // localStorage (iPhone limita localStorage a ~5MB). En localStorage queda solo lo liviano.
-function persist(){try{
-  localStorage.setItem(LS,JSON.stringify({settings:S.settings,clients:S.clients,loans:S.loans}));
-}catch(e){
-  if((e+'').includes('uota'))alert('Atención: el almacenamiento local está lleno. Cerrá y volvé a abrir la app para liberar espacio; si persiste, avisale a tu desarrollador.');}}
+function persist(){
+  const guardar=()=>localStorage.setItem(LS,JSON.stringify(
+    {settings:S.settings,clients:S.clients,loans:S.loans,trash:S.trash||[]}));
+  try{guardar();}
+  catch(e){
+    // si no entra, lo primero que se recorta es la papelera: nunca puede impedir
+    // que se guarden los clientes y préstamos de verdad (lo borrado sigue en la nube)
+    try{S.trash=(S.trash||[]).slice(0,15);guardar();return;}catch(e2){}
+    if((e+'').includes('uota'))alert('Atención: el almacenamiento local está lleno. Cerrá y volvé a abrir la app para liberar espacio; si persiste, avisale a tu desarrollador.');}}
 
 /* ----- IndexedDB para documentos ----- */
 let _idb=null;
@@ -457,12 +462,76 @@ function saveLoan(l){refreshLoanStatus(l);touch(l);const i=S.loans.findIndex(x=>
   if(i<0)S.loans.push(l);else S.loans[i]=l; persist(); fbPush('loan',l);}
 function saveDoc(d){touch(d);const i=S.docs.findIndex(x=>x.id===d.id);
   if(i<0)S.docs.push(d);else S.docs[i]=d; idbPut(d); persist(); fbPush('doc',d);}
+/* ----- PAPELERA: nada se borra de verdad, se puede restaurar ----- */
+const TRASH_MAX=150, TRASH_DIAS=365;
+function gestorDe(kind,obj){ // de quién es el ítem, para que cada socio vea solo lo suyo
+  if(kind==='doc'){const c=(S.clients||[]).find(x=>x.id===obj.clientId);return c?(c.gestorId||null):null;}
+  return obj.gestorId||null;
+}
+function puedeBorrar(kind,obj){ // un socio solo puede eliminar lo que es suyo
+  if(!esSocio())return true;
+  const g=gestorDe(kind,obj);
+  if(kind==='doc'&&g===null&&!(S.clients||[]).some(x=>x.id===obj.clientId))return true; // huérfano
+  return g===SESSION.socioId;
+}
+function trashPush(kind,obj,quien){
+  S.trash=S.trash||[];
+  const copia={...obj}; if(kind==='doc')delete copia.data; // la imagen queda en la nube, no en el teléfono
+  const nuevo=!S.trash.some(x=>x.id===obj.id);
+  S.trash=S.trash.filter(x=>x.id!==obj.id);
+  S.trash.unshift({id:obj.id,kind,t:Date.now(),por:quien||'',
+    gestorId:gestorDe(kind,obj),nombre:nombreDe(kind,obj),obj:copia});
+  const corte=Date.now()-TRASH_DIAS*DAY;
+  S.trash=S.trash.filter(x=>x.t>=corte).slice(0,TRASH_MAX);
+  return nuevo;
+}
+function nombreDe(kind,obj){
+  if(kind==='client')return obj.nombre||'Cliente';
+  if(kind==='loan'){const c=(S.clients||[]).find(x=>x.id===obj.clientId);
+    return (c?c.nombre:'Cliente')+' · '+fmt$(obj.monto||0);}
+  return obj.nombre||'Documento';
+}
 function delEntity(kind,obj){ // tombstone para que la baja se propague a otros dispositivos
+  if(!puedeBorrar(kind,obj)){alert('Esto no está asignado a tu cuenta, no lo podés eliminar.');return false;}
+  trashPush(kind,obj,SESSION.nombre||'');
   touch(obj); obj.deleted=true; fbPush(kind,obj);
   const arr=kind==='client'?S.clients:kind==='loan'?S.loans:S.docs;
   const i=arr.findIndex(x=>x.id===obj.id); if(i>=0)arr.splice(i,1);
   if(kind==='doc')idbDel(obj.id);
   persist();
+  return true;
+}
+function vTrash(){return esSocio()?(S.trash||[]).filter(x=>x.gestorId===SESSION.socioId):(S.trash||[]);}
+async function traerDataDeDoc(id){ // la imagen del documento borrado vive en la nube
+  if(!FB.base)return null;
+  try{const snap=await FB.base.collection('items').doc(id).get();
+    const d=snap.data(); if(!d||!d.json)return null;
+    const e=JSON.parse(d.json); return e.data||null;}catch(x){return null;}
+}
+async function restaurarDeLaPapelera(id){
+  const e=(S.trash||[]).find(x=>x.id===id); if(!e)return;
+  if(esSocio()&&e.gestorId!==SESSION.socioId)return alert('Eso no está asignado a tu cuenta.');
+  const hijos=e.kind==='client'
+    ?(S.trash||[]).filter(x=>x.id!==id&&x.obj&&x.obj.clientId===id):[];
+  const txt=`¿Restaurar ${e.kind==='client'?'el cliente':e.kind==='loan'?'el préstamo':'el documento'} "${e.nombre}"?`
+    +(hijos.length?`\n\nSe restauran también sus ${hijos.length} ítem(s) asociados (préstamos y documentos).`:'');
+  if(!confirm(txt))return;
+  for(const t of [e,...hijos])await revivir(t);
+  S.trash=(S.trash||[]).filter(x=>x!==e&&!hijos.includes(x));
+  persist();render();
+  alert('Restaurado ✅');
+}
+async function revivir(t){
+  const obj={...t.obj}; delete obj.deleted; touch(obj);
+  if(t.kind==='client'){const i=S.clients.findIndex(x=>x.id===obj.id);
+    if(i<0)S.clients.push(obj);else S.clients[i]=obj; fbPush('client',obj);}
+  else if(t.kind==='loan'){const i=S.loans.findIndex(x=>x.id===obj.id);
+    if(i<0)S.loans.push(obj);else S.loans[i]=obj; fbPush('loan',obj);}
+  else{
+    if(!obj.data)obj.data=await traerDataDeDoc(obj.id);
+    if(!obj.data){alert('El documento "'+(obj.nombre||'')+'" se restaura sin la imagen: no está en este dispositivo y no hay conexión con la nube.');}
+    const i=S.docs.findIndex(x=>x.id===obj.id);
+    if(i<0)S.docs.push(obj);else S.docs[i]=obj; idbPut(obj); fbPush('doc',obj);}
 }
 function saveSettings(){touch(S.settings);persist();fbPushSettings();applyBiz();}
 
@@ -501,7 +570,10 @@ function fbConnect(){
           const i=arr.findIndex(x=>x.id===ent.id);
           const localUp=i>=0?(arr[i].updatedAt||0):-1;
           if((ent.updatedAt||0)>localUp){
-            if(ent.deleted){if(i>=0){arr.splice(i,1);changed=true;}
+            if(ent.deleted){
+              // lo que borró otro dispositivo (o un socio) queda en TU papelera y lo podés restaurar
+              if(trashPush(d.kind,ent,''))changed=true;
+              if(i>=0){arr.splice(i,1);changed=true;}
               if(d.kind==='doc')idbDel(ent.id);}
             else{if(i<0)arr.push(ent);else arr[i]=ent;changed=true;
               if(d.kind==='doc')idbPut(ent);}
@@ -1410,6 +1482,22 @@ function vCalendario(){
 }
 
 /* ================= VISTA: AJUSTES ================= */
+function vPapelera(){
+  const t=vTrash();
+  const ico={client:'👤',loan:'💵',doc:'📄'}, nom={client:'Cliente',loan:'Préstamo',doc:'Documento'};
+  return `
+  <h2>🗑 Papelera <span class="cnt">${t.length}</span></h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <div class="hint" style="margin-top:10px">Nada se borra del todo: lo eliminado queda acá${esSocio()?'':' (también lo que borre un socio desde su cuenta)'} y se puede restaurar con todo su historial de pagos. Se guarda por un año.</div>
+    ${t.length?t.slice(0,60).map(x=>`<div class="item" style="cursor:default;padding-left:0;padding-right:0">
+      <div class="ava">${ico[x.kind]||'🗑'}</div>
+      <div class="mid"><div class="t1">${esc(x.nombre||'(sin nombre)')}</div>
+        <div class="t2">${nom[x.kind]||''} · eliminado el ${dLong(ymd(new Date(x.t)))}${x.por?' por '+esc(x.por):''}</div></div>
+      <button class="btn sec mini" data-restaurar="${x.id}">↩️ Restaurar</button>
+    </div>`).join(''):'<div class="empty" style="padding:18px">La papelera está vacía</div>'}
+    ${t.length>60?`<div class="hint">Se muestran los 60 más recientes de ${t.length}.</div>`:''}
+  </div>`;
+}
 function vMiCuenta(){ // pantalla reducida para un socio: sin ajustes del negocio
   const soc=(S.settings.socios||[]).find(x=>x.id===SESSION.socioId);
   const mios=vLoans(), act=mios.filter(l=>l.status==='activo');
@@ -1436,6 +1524,7 @@ function vMiCuenta(){ // pantalla reducida para un socio: sin ajustes del negoci
       <button class="btn sec" id="sec-lock">🔒 Cerrar sesión</button>
     </div>
   </div>
+  ${vPapelera()}
   <button class="btn sec" id="buscar-upd" style="margin-top:14px">🔁 Buscar actualización</button>
   <div class="hint" style="text-align:center;margin-top:18px">PrestaControl · versión ${APP_VER} · hecho a medida ✨</div>`;
 }
@@ -1559,6 +1648,7 @@ service cloud.firestore {
     <button class="btn sec" id="bk-import">⬆️ Importar</button>
     <input type="file" id="bk-file" accept="application/json" style="display:none">
   </div>
+  ${vPapelera()}
   <h2>⚠️ Zona de peligro</h2>
   <button class="btn red" id="wipe">Borrar todos los datos de este dispositivo</button>
   <button class="btn sec" id="buscar-upd" style="margin-top:14px">🔁 Buscar actualización</button>
@@ -2144,7 +2234,8 @@ function verDoc(id){
     const w=window.open('','_blank');
     if(w)w.document.write(d.tipo&&d.tipo.includes('pdf')?`<embed src="${d.data}" style="width:100%;height:100%">`:`<img src="${d.data}" style="max-width:100%">`);
   };
-  $('#d-del').onclick=()=>{if(confirm('¿Eliminar este documento?')){delEntity('doc',d);closeModal();render();}};
+  $('#d-del').onclick=()=>{if(confirm('¿Eliminar este documento?\n\nVa a la papelera: se puede restaurar.')){
+    if(delEntity('doc',d)){closeModal();render();}}};
 }
 
 /* ================= DOCUMENTOS: subida + compresión ================= */
@@ -2450,11 +2541,17 @@ function bindView(){
     msg+=pend.length?`Tenés ${pend.length} cuota${pend.length>1?'s':''} vencida${pend.length>1?'s':''} por un total de ${fmt$(pend.reduce((a,x)=>a+cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c),0))} (incluye mora). ¿Coordinamos el pago?`
       :deuda>0?`Te recordamos tu saldo pendiente de ${fmt$(deuda)}. ¡Gracias!`:`¡Gracias por estar al día! 🙌`;
     window.open('https://wa.me/'+b.dataset.wa+'?text='+encodeURIComponent(msg),'_blank');});
+  $$('[data-restaurar]').forEach(b=>b.onclick=()=>restaurarDeLaPapelera(b.dataset.restaurar));
   $$('[data-del-cli]').forEach(b=>b.onclick=()=>{
     const c=client(b.dataset.delCli);if(!c)return;
-    const nl=S.loans.filter(l=>l.clientId===c.id).length;
-    if(!confirm(`¿Eliminar a ${c.nombre}?${nl?` Se borrarán también sus ${nl} préstamo(s) y documentos.`:''}`))return;
-    S.loans.filter(l=>l.clientId===c.id).forEach(l=>delEntity('loan',l));
+    if(!puedeBorrar('client',c))return alert('Este cliente no está asignado a tu cuenta.');
+    const susLoans=S.loans.filter(l=>l.clientId===c.id);
+    // un socio no puede llevarse puesto un préstamo del dueño o de otro socio
+    const ajenos=esSocio()?susLoans.filter(l=>l.gestorId!==SESSION.socioId):[];
+    if(ajenos.length)return alert(`No podés eliminar a ${c.nombre}: tiene ${ajenos.length} préstamo(s) que no están a tu nombre. Pedíselo al dueño.`);
+    const nl=susLoans.length;
+    if(!confirm(`¿Eliminar a ${c.nombre}?${nl?` Se borrarán también sus ${nl} préstamo(s) y documentos.`:''}\n\nVa a la papelera: podés restaurarlo desde ${esSocio()?'Mi cuenta':'Ajustes'}.`))return;
+    susLoans.forEach(l=>delEntity('loan',l));
     S.docs.filter(d=>d.clientId===c.id).forEach(d=>delEntity('doc',d));
     delEntity('client',c);go('clientes');});
   $$('[data-contrato]').forEach(b=>b.onclick=()=>generarContrato(b.dataset.contrato));
@@ -2463,7 +2560,8 @@ function bindView(){
   $$('[data-fb]').forEach(b=>b.onclick=()=>window.open(b.dataset.fb,'_blank'));
   $$('[data-del-loan]').forEach(b=>b.onclick=()=>{
     const l=loan(b.dataset.delLoan);if(!l)return;
-    if(!confirm('¿Eliminar este préstamo y todo su historial de pagos?'))return;
+    if(!puedeBorrar('loan',l))return alert('Este préstamo no está asignado a tu cuenta.');
+    if(!confirm(`¿Eliminar este préstamo y todo su historial de pagos?\n\nVa a la papelera: podés restaurarlo desde ${esSocio()?'Mi cuenta':'Ajustes'}.`))return;
     delEntity('loan',l);go('prestamos');});
   $$('[data-cancel-loan]').forEach(b=>b.onclick=()=>{
     const l=loan(b.dataset.cancelLoan);if(!l)return;
