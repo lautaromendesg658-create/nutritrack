@@ -265,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=52; // mantener a la par del número de caché en sw.js
+const APP_VER=53; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -278,6 +278,7 @@ const DEF_SETTINGS={
   diasNoLaborables:[0,6], // días que no cuentan para la mora (0=dom … 6=sáb). Por defecto sáb y dom
   socios:[],
   recordatorios:{...DEF_REC},
+  purgados:[], // ids borrados definitivamente: viajan para que desaparezcan en todos los dispositivos
   updatedAt:0
 };
 // completa cualquier campo faltante en los ajustes (p. ej. si vienen de una versión vieja o de la nube)
@@ -287,6 +288,7 @@ function normSettings(st){st=st||{};
     cobrador:{...DEF_SETTINGS.cobrador,...(st.cobrador||{})},
     diasNoLaborables:Array.isArray(st.diasNoLaborables)?st.diasNoLaborables:[0,6],
     socios:st.socios||[],
+    purgados:Array.isArray(st.purgados)?st.purgados:[],
     recordatorios:{...DEF_REC,...(st.recordatorios||{})}};
 }
 let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[], drafts:[], trash:[]};
@@ -482,6 +484,7 @@ function puedeBorrar(kind,obj){ // un socio solo puede eliminar lo que es suyo
 }
 function trashPush(kind,obj,quien){
   S.trash=S.trash||[];
+  if(purgados().includes(obj.id))return false; // ya se borró definitivamente: no vuelve
   const copia={...obj}; if(kind==='doc')delete copia.data; // la imagen queda en la nube, no en el teléfono
   const nuevo=!S.trash.some(x=>x.id===obj.id);
   S.trash=S.trash.filter(x=>x.id!==obj.id);
@@ -507,7 +510,34 @@ function delEntity(kind,obj){ // tombstone para que la baja se propague a otros 
   persist();
   return true;
 }
-function vTrash(){return esSocio()?(S.trash||[]).filter(x=>x.gestorId===SESSION.socioId):(S.trash||[]);}
+function purgados(){return S.settings.purgados||[];}
+function podarPurgados(){ // saca de la papelera lo que se borró definitivamente en cualquier dispositivo
+  const p=purgados(); if(!p.length||!(S.trash||[]).length)return false;
+  const antes=S.trash.length;
+  S.trash=S.trash.filter(x=>!p.includes(x.id));
+  return S.trash.length!==antes;
+}
+function vTrash(){
+  const p=purgados();
+  const t=(S.trash||[]).filter(x=>!p.includes(x.id));
+  return esSocio()?t.filter(x=>x.gestorId===SESSION.socioId):t;
+}
+async function borrarDefinitivo(id){
+  if(esSocio())return alert('Solo el dueño puede borrar algo de forma definitiva.');
+  const e=(S.trash||[]).find(x=>x.id===id); if(!e)return;
+  const tipo=e.kind==='client'?'el cliente':e.kind==='loan'?'el préstamo':e.kind==='draft'?'el contrato':'el documento';
+  if(!confirm(`¿Borrar DEFINITIVAMENTE ${tipo} "${e.nombre}"?\n\nEsto NO se puede deshacer: se elimina también de la nube y de todos los dispositivos.\n\nSi tenés dudas, dejalo en la papelera: no molesta ni afecta ninguna cuenta.`))return;
+  if((prompt('Escribí BORRAR para confirmar:')||'').trim().toUpperCase()!=='BORRAR')return;
+  S.trash=(S.trash||[]).filter(x=>x.id!==id);
+  S.settings.purgados=[...purgados().filter(x=>x!==id),id].slice(-500);
+  saveSettings(); // persiste y avisa a los otros dispositivos
+  if(e.kind==='doc')idbDel(id);
+  let nube=true;
+  if(FB.base){try{await FB.base.collection('items').doc(id).delete();}catch(err){console.error(err);nube=false;}}
+  else nube=false;
+  persist();render();
+  alert(nube?'Borrado definitivamente ✅':'Borrado de la lista ✅\nNo se pudo alcanzar la nube ahora mismo; se termina de limpiar cuando vuelva la conexión.');
+}
 async function traerDataDeDoc(id){ // la imagen del documento borrado vive en la nube
   if(!FB.base)return null;
   try{const snap=await FB.base.collection('items').doc(id).get();
@@ -571,6 +601,7 @@ function fbConnect(){
       FB.unsubs.push(FB.base.collection('items').onSnapshot(snap=>{
         let changed=false;
         snap.docChanges().forEach(ch=>{
+          if(ch.type==='removed')return; // un documento eliminado de la nube no debe revivir en la papelera
           const d=ch.doc.data(); if(!d||!d.json)return;
           let ent; try{ent=JSON.parse(d.json);}catch(e){return;}
           const arr=['client','loan','doc','draft'].includes(d.kind)?arrDe(d.kind):null;
@@ -594,12 +625,16 @@ function fbConnect(){
       FB.unsubs.push(FB.base.collection('meta').doc('settings').onSnapshot(doc=>{
         const d=doc.data(); if(!d||!d.json)return;
         let st;try{st=JSON.parse(d.json);}catch(e){return;}
-        if((st.updatedAt||0)>(S.settings.updatedAt||0)){S.settings=normSettings(st);persist();applyBiz();render();}
+        if((st.updatedAt||0)>(S.settings.updatedAt||0)){S.settings=normSettings(st);
+          podarPurgados(); // si en otro dispositivo borraron algo definitivamente, acá también desaparece
+          persist();applyBiz();render();}
       }));
       // subir lo local que falte (primera conexión)
       FB.base.collection('items').get().then(snap=>{
         const remote={}; snap.forEach(doc=>{const d=doc.data();let e;try{e=JSON.parse(d.json);}catch(x){return;}
           remote[doc.id]=e.updatedAt||0;});
+        // termina de limpiar lo que se borró definitivamente sin conexión
+        purgados().forEach(id=>{if(id in remote)FB.base.collection('items').doc(id).delete().catch(()=>{});});
         [['client',S.clients],['loan',S.loans],['doc',S.docs],['draft',S.drafts]].forEach(([k,arr])=>{
           arr.forEach(o=>{if((o.updatedAt||0)>(remote[o.id]||0)||!(o.id in remote))fbPush(k,o);});
         });
@@ -1527,11 +1562,12 @@ function vPapelera(){
   return `
   <h2>🗑 Papelera <span class="cnt">${t.length}</span></h2>
   <div class="list" style="padding:4px 14px 16px">
-    <div class="hint" style="margin-top:10px">Nada se borra del todo: lo eliminado queda acá${esSocio()?'':' (también lo que borre un socio desde su cuenta)'} y se puede restaurar con todo su historial de pagos. Se guarda por un año.</div>
+    <div class="hint" style="margin-top:10px">Nada se borra del todo: lo eliminado queda acá${esSocio()?'':' (también lo que borre un socio desde su cuenta)'} y se puede restaurar con todo su historial de pagos. Se guarda por un año.${esSocio()?'':' Si querés sacar algo de acá para siempre, usá <b>🔥 borrar definitivamente</b>: eso sí es irreversible.'}</div>
     ${t.length?t.slice(0,60).map(x=>`<div class="item" style="cursor:default;padding-left:0;padding-right:0">
       <div class="ava">${ico[x.kind]||'🗑'}</div>
       <div class="mid"><div class="t1">${esc(x.nombre||'(sin nombre)')}</div>
-        <div class="t2">${nom[x.kind]||''} · eliminado el ${dLong(ymd(new Date(x.t)))}${x.por?' por '+esc(x.por):''}</div></div>
+        <div class="t2">${nom[x.kind]||''} · eliminado el ${dLong(ymd(new Date(x.t)))}${x.por?' por '+esc(x.por):''}</div>
+        ${esSocio()?'':`<div class="t2" style="margin-top:5px"><span class="undo" data-purgar="${x.id}">🔥 borrar definitivamente</span></div>`}</div>
       <button class="btn sec mini" data-restaurar="${x.id}">↩️ Restaurar</button>
     </div>`).join(''):'<div class="empty" style="padding:18px">La papelera está vacía</div>'}
     ${t.length>60?`<div class="hint">Se muestran los 60 más recientes de ${t.length}.</div>`:''}
@@ -2685,6 +2721,7 @@ function bindView(){
       :deuda>0?`Te recordamos tu saldo pendiente de ${fmt$(deuda)}. ¡Gracias!`:`¡Gracias por estar al día! 🙌`;
     window.open('https://wa.me/'+b.dataset.wa+'?text='+encodeURIComponent(msg),'_blank');});
   $$('[data-restaurar]').forEach(b=>b.onclick=()=>restaurarDeLaPapelera(b.dataset.restaurar));
+  $$('[data-purgar]').forEach(b=>b.onclick=()=>borrarDefinitivo(b.dataset.purgar));
   $$('[data-vercontrato]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.vercontrato);if(d)generarContrato(d);});
   $$('[data-tyc-draft]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.tycDraft);if(d)enviarTyC(d);});
   $$('[data-editcontrato]').forEach(b=>b.onclick=()=>formContratoPrevio(null,b.dataset.editcontrato));
