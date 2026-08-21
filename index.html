@@ -265,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=51; // mantener a la par del número de caché en sw.js
+const APP_VER=52; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -289,16 +289,17 @@ function normSettings(st){st=st||{};
     socios:st.socios||[],
     recordatorios:{...DEF_REC,...(st.recordatorios||{})}};
 }
-let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[], trash:[]};
+let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[], drafts:[], trash:[]};
 try{const raw=localStorage.getItem(LS); if(raw){const p=JSON.parse(raw);
   S={settings:normSettings(p.settings),
-    clients:p.clients||[], loans:p.loans||[], docs:p.docs||[], trash:p.trash||[]};}}catch(e){}
+    clients:p.clients||[], loans:p.loans||[], docs:p.docs||[],
+    drafts:p.drafts||[], trash:p.trash||[]};}}catch(e){}
 
 // Los documentos (imágenes) viven en IndexedDB, que tiene mucho más espacio que
 // localStorage (iPhone limita localStorage a ~5MB). En localStorage queda solo lo liviano.
 function persist(){
   const guardar=()=>localStorage.setItem(LS,JSON.stringify(
-    {settings:S.settings,clients:S.clients,loans:S.loans,trash:S.trash||[]}));
+    {settings:S.settings,clients:S.clients,loans:S.loans,drafts:S.drafts||[],trash:S.trash||[]}));
   try{guardar();}
   catch(e){
     // si no entra, lo primero que se recorta es la papelera: nunca puede impedir
@@ -462,8 +463,13 @@ function saveLoan(l){refreshLoanStatus(l);touch(l);const i=S.loans.findIndex(x=>
   if(i<0)S.loans.push(l);else S.loans[i]=l; persist(); fbPush('loan',l);}
 function saveDoc(d){touch(d);const i=S.docs.findIndex(x=>x.id===d.id);
   if(i<0)S.docs.push(d);else S.docs[i]=d; idbPut(d); persist(); fbPush('doc',d);}
+function saveDraft(d){touch(d);const i=S.drafts.findIndex(x=>x.id===d.id);
+  if(i<0)S.drafts.push(d);else S.drafts[i]=d; persist(); fbPush('draft',d);}
+function draft(id){return (S.drafts||[]).find(x=>x.id===id);}
+const vDrafts=()=>esSocio()?(S.drafts||[]).filter(d=>d.gestorId===SESSION.socioId):(S.drafts||[]);
 /* ----- PAPELERA: nada se borra de verdad, se puede restaurar ----- */
 const TRASH_MAX=150, TRASH_DIAS=365;
+function arrDe(kind){return kind==='client'?S.clients:kind==='loan'?S.loans:kind==='draft'?S.drafts:S.docs;}
 function gestorDe(kind,obj){ // de quién es el ítem, para que cada socio vea solo lo suyo
   if(kind==='doc'){const c=(S.clients||[]).find(x=>x.id===obj.clientId);return c?(c.gestorId||null):null;}
   return obj.gestorId||null;
@@ -487,7 +493,7 @@ function trashPush(kind,obj,quien){
 }
 function nombreDe(kind,obj){
   if(kind==='client')return obj.nombre||'Cliente';
-  if(kind==='loan'){const c=(S.clients||[]).find(x=>x.id===obj.clientId);
+  if(kind==='loan'||kind==='draft'){const c=(S.clients||[]).find(x=>x.id===obj.clientId);
     return (c?c.nombre:'Cliente')+' · '+fmt$(obj.monto||0);}
   return obj.nombre||'Documento';
 }
@@ -495,7 +501,7 @@ function delEntity(kind,obj){ // tombstone para que la baja se propague a otros 
   if(!puedeBorrar(kind,obj)){alert('Esto no está asignado a tu cuenta, no lo podés eliminar.');return false;}
   trashPush(kind,obj,SESSION.nombre||'');
   touch(obj); obj.deleted=true; fbPush(kind,obj);
-  const arr=kind==='client'?S.clients:kind==='loan'?S.loans:S.docs;
+  const arr=arrDe(kind);
   const i=arr.findIndex(x=>x.id===obj.id); if(i>=0)arr.splice(i,1);
   if(kind==='doc')idbDel(obj.id);
   persist();
@@ -527,6 +533,8 @@ async function revivir(t){
     if(i<0)S.clients.push(obj);else S.clients[i]=obj; fbPush('client',obj);}
   else if(t.kind==='loan'){const i=S.loans.findIndex(x=>x.id===obj.id);
     if(i<0)S.loans.push(obj);else S.loans[i]=obj; fbPush('loan',obj);}
+  else if(t.kind==='draft'){const i=S.drafts.findIndex(x=>x.id===obj.id);
+    if(i<0)S.drafts.push(obj);else S.drafts[i]=obj; fbPush('draft',obj);}
   else{
     if(!obj.data)obj.data=await traerDataDeDoc(obj.id);
     if(!obj.data){alert('El documento "'+(obj.nombre||'')+'" se restaura sin la imagen: no está en este dispositivo y no hay conexión con la nube.');}
@@ -565,7 +573,7 @@ function fbConnect(){
         snap.docChanges().forEach(ch=>{
           const d=ch.doc.data(); if(!d||!d.json)return;
           let ent; try{ent=JSON.parse(d.json);}catch(e){return;}
-          const arr=d.kind==='client'?S.clients:d.kind==='loan'?S.loans:d.kind==='doc'?S.docs:null;
+          const arr=['client','loan','doc','draft'].includes(d.kind)?arrDe(d.kind):null;
           if(!arr)return;
           const i=arr.findIndex(x=>x.id===ent.id);
           const localUp=i>=0?(arr[i].updatedAt||0):-1;
@@ -592,7 +600,7 @@ function fbConnect(){
       FB.base.collection('items').get().then(snap=>{
         const remote={}; snap.forEach(doc=>{const d=doc.data();let e;try{e=JSON.parse(d.json);}catch(x){return;}
           remote[doc.id]=e.updatedAt||0;});
-        [['client',S.clients],['loan',S.loans],['doc',S.docs]].forEach(([k,arr])=>{
+        [['client',S.clients],['loan',S.loans],['doc',S.docs],['draft',S.drafts]].forEach(([k,arr])=>{
           arr.forEach(o=>{if((o.updatedAt||0)>(remote[o.id]||0)||!(o.id in remote))fbPush(k,o);});
         });
         if((S.settings.updatedAt||0)>0)fbPushSettings();
@@ -673,6 +681,28 @@ function sortVenc(arr,mode){
   else if(mode==='cliente')a.sort((x,y)=>nom(x)<nom(y)?-1:nom(x)>nom(y)?1:(x.c.vence<y.c.vence?-1:1));
   else a.sort((x,y)=>x.c.vence<y.c.vence?-1:x.c.vence>y.c.vence?1:0); // 'atraso': más viejo primero
   return a;
+}
+function vPendientes(){ // contratos armados que todavía no se firmaron
+  const ds=vDrafts().slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  if(!ds.length)return '';
+  return `
+  <h2>📄 Contratos pendientes de firma <span class="cnt">${ds.length}</span></h2>
+  <div class="hint" style="margin:-4px 0 10px">Todavía no son préstamos: no cuentan como plata prestada ni generan mora. Cuando el cliente firme y le des la plata, tocá <b>Crear préstamo</b>.</div>
+  <div class="list">${ds.map(d=>{
+    const cl=client(d.clientId)||{nombre:'?'};
+    return `<div class="item" style="cursor:default">
+      <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
+      <div class="mid"><div class="t1">${esc(cl.nombre)} <span class="badge b-fut">${d.contratoTipo==='comercial'?'Comercial':'Personal'}</span></div>
+        <div class="t2">${d.cuotas.length} cuotas ${FREQ[d.frecuencia].toLowerCase()} de ${fmt$(d.cuotas[0].monto)} · primer cobro ${dShort(d.inicio)}</div>
+        <div class="t2">Armado el ${dShort(ymd(new Date(d.createdAt||Date.now())))}</div>
+        <div class="t2" style="margin-top:6px">
+          <span class="clip" data-vercontrato="${d.id}">📄 ver contrato</span>
+          · <span class="clip" data-tyc-draft="${d.id}">📲 T&C</span>
+          · <span class="clip" data-editcontrato="${d.id}">✏️ editar</span>
+          · <span class="undo" data-delcontrato="${d.id}">descartar</span></div></div>
+      <div class="end"><div class="m1">${fmt$(d.monto)}</div>
+        <button class="btn mini" data-firmado="${d.id}" style="margin-top:6px;white-space:nowrap">✅ Crear préstamo</button></div>
+    </div>`;}).join('')}</div>`;
 }
 function vInicio(){
   const t=todayStr();
@@ -755,7 +785,11 @@ function vInicio(){
     <button class="btn" id="rec-btn" style="background:#25D366;color:#fff;flex:2">🔔 Recordatorios · ${recLista('hoy').length} hoy · ${recLista('vencido').length} vencidos</button>
     <button class="btn sec" id="alias-btn" style="flex:1">📋 Alias</button>
   </div>
-  <button class="btn sec" id="sim-btn" style="margin-top:8px">🧮 Simulador de préstamos</button>
+  <div class="btnrow" style="margin-top:8px">
+    <button class="btn sec" id="sim-btn" style="flex:1">🧮 Simulador</button>
+    <button class="btn sec" id="cn-btn" style="flex:1">📄 Nuevo contrato</button>
+  </div>
+  ${vPendientes()}
   ${repartoHTML}
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
@@ -818,7 +852,10 @@ function vCliente(id){
     ${d.tipo&&d.tipo.includes('pdf')?'<div class="pdf">📄</div>':`<img src="${d.data}" loading="lazy">`}
     <div class="nm">${esc(d.nombre)}</div></div>`).join('')}</div>
   <h2>💵 Préstamos <span class="cnt">${loans.length}</span></h2>
-  <button class="btn" data-new-loan="${id}">+ Nuevo préstamo</button>
+  <div class="btnrow">
+    <button class="btn" data-new-loan="${id}" style="flex:1">+ Nuevo préstamo</button>
+    <button class="btn sec" data-new-contrato="${id}" style="flex:1">📄 Nuevo contrato</button>
+  </div>
   <div class="list" style="margin-top:10px">${loans.length?loans.map(rowLoan).join(''):'<div class="empty">Sin préstamos</div>'}</div>`;
 }
 
@@ -1032,7 +1069,7 @@ function tycTexto(l){
     +`AL ACEPTAR LOS TÉRMINOS Y CONDICIONES ESTÁ ACEPTANDO CUMPLIR CON LOS MISMOS.`;
 }
 function enviarTyC(loanId){
-  const l=loan(loanId);if(!l)return;
+  const l=(loanId&&typeof loanId==='object')?loanId:loan(loanId);if(!l)return;
   const cl=client(l.clientId)||{};
   if(!(cl.telefono||'').replace(/\D/g,''))return alert('Este cliente no tiene teléfono cargado. Agregalo en la ficha del cliente para poder enviarle los términos por WhatsApp.');
   waOpen(cl.telefono,tycTexto(l));
@@ -1202,8 +1239,10 @@ function descargarPdf(blob,fname){
 }
 
 /* ================= CONTRATO PDF ================= */
+// acepta el id de un préstamo o directamente un objeto con forma de préstamo (un borrador de contrato)
+function comoPrestamo(x){return (x&&typeof x==='object')?x:loan(x);}
 function generarContrato(id){
-  const l=loan(id); if(!l)return;
+  const l=comoPrestamo(id); if(!l)return;
   const cl=client(l.clientId)||{};
   const sugerido=(l.tipo==='comercial'||cl.tipo==='comercio')?'comercial':'personal';
   modal(`<h3>Generar contrato</h3>
@@ -1217,10 +1256,10 @@ function generarContrato(id){
   let tipo=sugerido;
   $$('#ct-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
     $$('#ct-tipo button').forEach(x=>x.classList.toggle('on',x===b));});
-  $('#ct-go').onclick=()=>{closeModal();armarContrato(id,tipo);};
+  $('#ct-go').onclick=()=>{closeModal();armarContrato(l,tipo);};
 }
 function armarContrato(id,tipo){
-  const l=loan(id); if(!l)return;
+  const l=comoPrestamo(id); if(!l)return;
   const cl=client(l.clientId)||{};
   const esCom=tipo==='comercial';
   const m=S.settings.mora||{tipo:'pct',valor:5,porDia:false};
@@ -1761,6 +1800,108 @@ function formSimulador(){
     formPrestamo(null,{monto:+$('#sim-monto').value||'',interes:+$('#sim-int').value||0,n:+$('#sim-n').value||'',freq:$('#sim-freq').value});
   };
   upd();
+}
+/* ----- CONTRATO PRIMERO: se arma el borrador, se firma, y recién ahí nace el préstamo ----- */
+function formContratoPrevio(clientId,draftId){
+  if(!vClients().length){alert('Primero cargá un cliente.');go('clientes');return;}
+  const d=draftId?draft(draftId):null;
+  const cl0=d?client(d.clientId):(clientId?client(clientId):null);
+  modal(`<h3>${d?'Editar':'Nuevo'} contrato</h3>
+  <div class="hint">Armá el contrato con las condiciones acordadas. El préstamo <b>todavía no se crea</b>: recién nace cuando el cliente firma y le entregás la plata, así no le corre la mora antes de tiempo.</div>
+  <label>Cliente *</label>
+  <select id="cn-cli">${vClients().slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(c=>
+    `<option value="${c.id}" ${c.id===(d?d.clientId:clientId)?'selected':''}>${esc(c.nombre)} (${c.tipo==='comercio'?'comercio':'persona'})</option>`).join('')}</select>
+  <label>Tipo de contrato</label>
+  <div class="seg" id="cn-tipo">
+    <button data-v="personal" class="${(d?d.contratoTipo:((cl0&&cl0.tipo==='comercio')?'comercial':'personal'))==='personal'?'on':''}">👤 Personal</button>
+    <button data-v="comercial" class="${(d?d.contratoTipo:((cl0&&cl0.tipo==='comercio')?'comercial':'personal'))==='comercial'?'on':''}">🏪 Comercial</button>
+  </div>
+  <div class="frow">
+    <div><label>Monto a prestar *</label><input id="cn-monto" type="number" inputmode="decimal" placeholder="100000" value="${d?d.monto:''}"></div>
+    <div><label>Interés % *</label><input id="cn-int" type="number" inputmode="decimal" placeholder="30" value="${d?d.interes:''}"></div>
+  </div>
+  <div class="frow">
+    <div><label>Frecuencia</label><select id="cn-freq">
+      ${['diaria','semanal','quincenal'].map(f=>`<option value="${f}" ${d&&d.frecuencia===f?'selected':''}>${FREQ[f]}</option>`).join('')}</select></div>
+    <div><label>Cant. de cuotas *</label><input id="cn-n" type="number" inputmode="numeric" placeholder="30" value="${d?d.cuotas.length:''}"></div>
+  </div>
+  <label>Primer cobro (si firma hoy)</label><input id="cn-inicio" type="date" value="${d?d.inicio:fechaPrimerCobro('diaria')}">
+  <div class="hint">Si el cliente firma más adelante, al crear el préstamo vas a poder recalcular esta fecha.</div>
+  <div class="resume" id="cn-resume">Completá monto, interés y cuotas para ver el resumen.</div>
+  <button class="btn" id="cn-save" style="margin-top:16px">📄 Guardar y ver el contrato</button>`);
+  let tipo=d?d.contratoTipo:((cl0&&cl0.tipo==='comercio')?'comercial':'personal');
+  $$('#cn-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
+    $$('#cn-tipo button').forEach(x=>x.classList.toggle('on',x===b));});
+  let fechaManual=!!d;
+  $('#cn-inicio').addEventListener('input',()=>fechaManual=true);
+  const upd=()=>{
+    const m=+$('#cn-monto').value||0,i=+$('#cn-int').value||0,n=+$('#cn-n').value||0,f=$('#cn-freq').value;
+    if(!m||!n){$('#cn-resume').textContent='Completá monto, interés y cuotas para ver el resumen.';return;}
+    const total=Math.round(m*(1+i/100));
+    const cs=genCuotas(total,n,f,$('#cn-inicio').value||todayStr(),false);
+    $('#cn-resume').innerHTML=`Total a devolver: <b>${fmt$(total)}</b><br>
+      ${n} cuotas ${{diaria:'diarias',semanal:'semanales',quincenal:'quincenales'}[f]} de <b>${fmt$(cs[0].monto)}</b><br>
+      Última cuota: ${dLong(cs[cs.length-1].vence)}<br>Ganancia: <b>${fmt$(total-m)}</b>`;
+  };
+  ['cn-monto','cn-int','cn-n','cn-freq','cn-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
+  $('#cn-freq').addEventListener('change',()=>{
+    if(!fechaManual){$('#cn-inicio').value=fechaPrimerCobro($('#cn-freq').value);upd();}});
+  upd();
+  $('#cn-save').onclick=()=>{
+    const m=+$('#cn-monto').value,i=+$('#cn-int').value||0,n=+$('#cn-n').value,f=$('#cn-freq').value,ini=$('#cn-inicio').value;
+    if(!m||m<=0)return alert('Poné el monto a prestar');
+    if(!n||n<1)return alert('Poné la cantidad de cuotas');
+    if(!ini)return alert('Elegí la fecha del primer cobro');
+    const total=Math.round(m*(1+i/100));
+    const cid=$('#cn-cli').value;
+    const obj=d?{...d}:{id:uid(),createdAt:Date.now()};
+    Object.assign(obj,{clientId:cid,tipo:tipo==='comercial'?'comercial':'personal',contratoTipo:tipo,
+      monto:m,interes:i,total,frecuencia:f,inicio:ini,
+      cuotas:genCuotas(total,n,f,ini,false)});
+    if(!d){ // el borrador queda a nombre de quien lo crea, o del socio que gestiona al cliente
+      const c=client(cid);
+      obj.gestorId=esSocio()?SESSION.socioId:((c&&c.gestorId)||null);
+    }
+    saveDraft(obj);closeModal();render();
+    generarContrato(obj);
+  };
+}
+function convertirEnPrestamo(draftId){
+  const d=draft(draftId); if(!d)return;
+  const cl=client(d.clientId)||{nombre:'?'};
+  const f=d.frecuencia, hoy=todayStr();
+  const vencido=d.inicio<hoy;
+  const sugerido=vencido?fechaPrimerCobro(f):d.inicio;
+  modal(`<h3>✅ Crear el préstamo</h3>
+  <div class="hint">Confirmá esto cuando <b>${esc(cl.nombre)}</b> ya firmó el contrato y le entregaste la plata. Ahí arranca a contar el préstamo.</div>
+  <div class="resume">Prestás <b>${fmt$(d.monto)}</b> · devuelve <b>${fmt$(d.total)}</b><br>
+    ${d.cuotas.length} cuotas ${FREQ[f].toLowerCase()} de <b>${fmt$(d.cuotas[0].monto)}</b></div>
+  <label>Primer cobro</label><input id="cv-inicio" type="date" value="${sugerido}">
+  ${vencido?`<div class="hint">⚠️ La fecha del contrato (${dLong(d.inicio)}) ya pasó, así que la recalculé desde hoy. Cambiala si acordaste otra.</div>`
+    :'<div class="hint">Es la fecha que figura en el contrato. Podés cambiarla si acordaron otra cosa.</div>'}
+  ${f==='diaria'?`<label>Domingos</label><div class="seg" id="cv-sun">
+    <button data-v="1" class="on">Saltar</button><button data-v="0">Cobrar</button></div>`:''}
+  <div class="resume" id="cv-resume"></div>
+  <button class="btn" id="cv-go" style="margin-top:16px">💵 Crear el préstamo</button>`);
+  let skipSun=true;
+  if(f==='diaria')$$('#cv-sun button').forEach(b=>b.onclick=()=>{skipSun=b.dataset.v==='1';
+    $$('#cv-sun button').forEach(x=>x.classList.toggle('on',x===b));upd();});
+  const upd=()=>{
+    const cs=genCuotas(d.total,d.cuotas.length,f,$('#cv-inicio').value||hoy,f==='diaria'&&skipSun);
+    $('#cv-resume').innerHTML=`Cobrás desde <b>${dLong(cs[0].vence)}</b> hasta <b>${dLong(cs[cs.length-1].vence)}</b>`;
+  };
+  $('#cv-inicio').oninput=upd;upd();
+  $('#cv-go').onclick=()=>{
+    const ini=$('#cv-inicio').value; if(!ini)return alert('Elegí la fecha del primer cobro');
+    const l={id:uid(),clientId:d.clientId,tipo:d.tipo,monto:d.monto,interes:d.interes,total:d.total,
+      frecuencia:f,inicio:ini,cuotas:genCuotas(d.total,d.cuotas.length,f,ini,f==='diaria'&&skipSun),
+      status:'activo',createdAt:Date.now(),desdeContrato:d.id};
+    if(d.gestorId){l.gestorId=d.gestorId;l.gestorPct=socioPct(d.gestorId);l.gestorNombre=socioNombre(d.gestorId);}
+    saveLoan(l);
+    delEntity('draft',d); // sale de pendientes; queda en la papelera por si acaso
+    closeModal();go('prestamos',l.id);
+    alert('Préstamo creado ✅\nPrimera cuota: '+dLong(l.cuotas[0].vence));
+  };
 }
 function formPrestamo(clientId,preset){
   if(!vClients().length){alert('Primero cargá un cliente.');go('clientes');return;}
@@ -2499,8 +2640,8 @@ function importar(file){
     const p=JSON.parse(fr.result);
     if(!p.clients||!p.loans)throw 0;
     if(!confirm(`El archivo tiene ${p.clients.length} clientes y ${p.loans.length} préstamos. ¿Importar? (se combina con lo actual)`))return;
-    [['client',p.clients],['loan',p.loans],['doc',p.docs||[]]].forEach(([k,arr])=>arr.forEach(o=>{
-      const tgt=k==='client'?S.clients:k==='loan'?S.loans:S.docs;
+    [['client',p.clients],['loan',p.loans],['doc',p.docs||[]],['draft',p.drafts||[]]].forEach(([k,arr])=>arr.forEach(o=>{
+      const tgt=arrDe(k);
       const i=tgt.findIndex(x=>x.id===o.id);
       if(i<0)tgt.push(o);else if((o.updatedAt||0)>(tgt[i].updatedAt||0))tgt[i]=o;
       if(k==='doc')idbPut(o);
@@ -2520,7 +2661,8 @@ function bindView(){
     repartoOpen.has(k)?repartoOpen.delete(k):repartoOpen.add(k);render();});
   {const rb=$('#rec-btn');if(rb)rb.onclick=()=>{recFilter='hoy';formRecordatorios();};
    const ab=$('#alias-btn');if(ab)ab.onclick=()=>copiarAlias(ab);
-   const sb=$('#sim-btn');if(sb)sb.onclick=()=>formSimulador();}
+   const sb=$('#sim-btn');if(sb)sb.onclick=()=>formSimulador();
+   const cb=$('#cn-btn');if(cb)cb.onclick=()=>formContratoPrevio();}
   $$('[data-cobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
   $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
@@ -2534,6 +2676,7 @@ function bindView(){
   $$('[data-day]').forEach(b=>b.onclick=()=>{calSel=b.dataset.day;render();});
   $$('[data-edit-cli]').forEach(b=>b.onclick=()=>formCliente(b.dataset.editCli));
   $$('[data-new-loan]').forEach(b=>b.onclick=()=>formPrestamo(b.dataset.newLoan));
+  $$('[data-new-contrato]').forEach(b=>b.onclick=()=>formContratoPrevio(b.dataset.newContrato));
   $$('[data-wa]').forEach(b=>b.onclick=()=>{
     const cid=DETAIL,deuda=clienteDeuda(cid),cl=client(cid);
     const pend=cobrosVencidos().filter(x=>x.l.clientId===cid);
@@ -2542,6 +2685,15 @@ function bindView(){
       :deuda>0?`Te recordamos tu saldo pendiente de ${fmt$(deuda)}. ¡Gracias!`:`¡Gracias por estar al día! 🙌`;
     window.open('https://wa.me/'+b.dataset.wa+'?text='+encodeURIComponent(msg),'_blank');});
   $$('[data-restaurar]').forEach(b=>b.onclick=()=>restaurarDeLaPapelera(b.dataset.restaurar));
+  $$('[data-vercontrato]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.vercontrato);if(d)generarContrato(d);});
+  $$('[data-tyc-draft]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.tycDraft);if(d)enviarTyC(d);});
+  $$('[data-editcontrato]').forEach(b=>b.onclick=()=>formContratoPrevio(null,b.dataset.editcontrato));
+  $$('[data-firmado]').forEach(b=>b.onclick=()=>convertirEnPrestamo(b.dataset.firmado));
+  $$('[data-delcontrato]').forEach(b=>b.onclick=()=>{
+    const d=draft(b.dataset.delcontrato);if(!d)return;
+    const cl=client(d.clientId)||{nombre:'?'};
+    if(!confirm(`¿Descartar el contrato de ${cl.nombre} por ${fmt$(d.monto)}?\n\nVa a la papelera: se puede restaurar.`))return;
+    delEntity('draft',d);render();});
   $$('[data-del-cli]').forEach(b=>b.onclick=()=>{
     const c=client(b.dataset.delCli);if(!c)return;
     if(!puedeBorrar('client',c))return alert('Este cliente no está asignado a tu cuenta.');
