@@ -265,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=54; // mantener a la par del número de caché en sw.js
+const APP_VER=55; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -670,7 +670,7 @@ setInterval(tickClock,1000);tickClock();
 setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
 
 /* ================= NAVEGACIÓN ================= */
-let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', repartoOpen=new Set(), vencSort='atraso';
+let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencSort='atraso';
 $$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
 $('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
 function go(v,detail){VIEW=v;DETAIL=detail||null;render();}
@@ -842,19 +842,37 @@ function ini(n){return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join
 function clienteDeuda(id){return vLoans().filter(l=>l.clientId===id&&l.status==='activo').reduce((a,l)=>a+loanRestante(l),0);}
 function vClientes(){
   const q=cliQ.toLowerCase();
-  const cs=vClients().filter(c=>!q||c.nombre.toLowerCase().includes(q)||(c.telefono||'').includes(q))
+  const socios=S.settings.socios||[];
+  // el socio ya ve solo lo suyo: el filtro por gestor es cosa del dueño
+  const conFiltro=!esSocio()&&socios.length>0;
+  if(conFiltro&&cliGestor!=='todos'&&cliGestor!=='mios'&&!socios.some(s=>s.id===cliGestor))cliGestor='todos';
+  const porGestor=c=>!conFiltro||cliGestor==='todos'||(cliGestor==='mios'?!c.gestorId:c.gestorId===cliGestor);
+  const base=vClients().filter(porGestor);
+  const cs=base.filter(c=>!q||c.nombre.toLowerCase().includes(q)||(c.telefono||'').includes(q))
     .sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  const cuenta=k=>vClients().filter(c=>k==='todos'||(k==='mios'?!c.gestorId:c.gestorId===k)).length;
+  const deudaBase=base.reduce((a,c)=>a+clienteDeuda(c.id),0);
+  const nombreFiltro=cliGestor==='todos'?'':cliGestor==='mios'?'tuyos (sin socio)':'de '+(socioNombre(cliGestor)||'socio');
   return `
   <div class="search"><input id="cliq" placeholder="Buscar cliente…" value="${esc(cliQ)}"></div>
+  ${conFiltro?`<div class="chips">
+    <button class="${cliGestor==='todos'?'on':''}" data-cg="todos">👥 Todos (${cuenta('todos')})</button>
+    <button class="${cliGestor==='mios'?'on':''}" data-cg="mios">🙋 Míos (${cuenta('mios')})</button>
+    ${socios.map(s=>`<button class="${cliGestor===s.id?'on':''}" data-cg="${s.id}">🤝 ${esc(s.nombre)} (${cuenta(s.id)})</button>`).join('')}
+  </div>
+  ${cliGestor!=='todos'?`<div class="resume">${base.length} cliente${base.length===1?'':'s'} ${nombreFiltro}${deudaBase>0?` · deben <b>${fmt$(deudaBase)}</b>`:''}</div>`:''}`:''}
   <div class="list">${cs.length?cs.map(c=>{
     const act=vLoans().filter(l=>l.clientId===c.id&&l.status==='activo').length;
     const deuda=clienteDeuda(c.id);
     return `<div class="item" data-cli="${c.id}">
       <div class="ava ${c.tipo==='comercio'?'shop':''}">${esc(ini(c.nombre))}</div>
       <div class="mid"><div class="t1">${esc(c.nombre)} <span class="badge ${c.tipo==='comercio'?'b-com':'b-per'}">${c.tipo==='comercio'?'Comercio':'Persona'}</span></div>
-      <div class="t2">${esc(c.telefono||'sin teléfono')}${act?` · ${act} préstamo${act>1?'s':''} activo${act>1?'s':''}`:''}</div></div>
+      <div class="t2">${esc(c.telefono||'sin teléfono')}${act?` · ${act} préstamo${act>1?'s':''} activo${act>1?'s':''}`:''}</div>
+      ${conFiltro&&cliGestor==='todos'&&c.gestorId&&socioNombre(c.gestorId)?`<div class="t2">🤝 ${esc(socioNombre(c.gestorId))}</div>`:''}</div>
       <div class="end">${deuda>0?`<div class="m1">${fmt$(deuda)}</div><div class="m2">debe</div>`:'<div class="m2">sin deuda</div>'}</div>
-    </div>`;}).join(''):'<div class="empty">Todavía no cargaste clientes.<br>Tocá el botón + para agregar el primero.</div>'}</div>`;
+    </div>`;}).join(''):`<div class="empty">${q?'Ningún cliente coincide con la búsqueda.'
+      :conFiltro&&cliGestor!=='todos'?'No hay clientes '+nombreFiltro+'.<br>Asignalos desde la ficha del cliente › ✏️ Editar › Gestionado por.'
+      :'Todavía no cargaste clientes.<br>Tocá el botón + para agregar el primero.'}</div>`}</div>`;
 }
 function vCliente(id){
   const c=client(id); if(!c)return '<div class="empty">Cliente no encontrado</div>';
@@ -2728,6 +2746,7 @@ function bindView(){
   $$('[data-reparto]').forEach(b=>b.onclick=()=>formReparto(b.dataset.reparto));
   $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
   $$('[data-vs]').forEach(b=>b.onclick=()=>{vencSort=b.dataset.vs;render();});
+  $$('[data-cg]').forEach(b=>b.onclick=()=>{cliGestor=b.dataset.cg;render();});
   $$('[data-cal]').forEach(b=>b.onclick=()=>{calRef=new Date(calRef.getFullYear(),calRef.getMonth()+ +b.dataset.cal,1);render();});
   $$('[data-day]').forEach(b=>b.onclick=()=>{calSel=b.dataset.day;render();});
   $$('[data-edit-cli]').forEach(b=>b.onclick=()=>formCliente(b.dataset.editCli));
