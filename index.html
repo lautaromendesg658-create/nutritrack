@@ -265,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=56; // mantener a la par del número de caché en sw.js
+const APP_VER=57; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -717,27 +717,37 @@ function sortVenc(arr,mode){
   else a.sort((x,y)=>x.c.vence<y.c.vence?-1:x.c.vence>y.c.vence?1:0); // 'atraso': más viejo primero
   return a;
 }
-function vPendientes(){ // contratos armados que todavía no se firmaron
-  const ds=vDrafts().slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+function vPendientes(){ // contratos armados que todavía no se convirtieron en préstamo
+  const ds=vDrafts().slice().sort((a,b)=>
+    (b.firmado?1:0)-(a.firmado?1:0)||(b.createdAt||0)-(a.createdAt||0)); // los firmados primero
   if(!ds.length)return '';
+  const sinFirmar=ds.filter(d=>!d.firmado).length;
   return `
-  <h2>📄 Contratos pendientes de firma <span class="cnt">${ds.length}</span></h2>
-  <div class="hint" style="margin:-4px 0 10px">Todavía no son préstamos: no cuentan como plata prestada ni generan mora. Cuando el cliente firme y le des la plata, tocá <b>Crear préstamo</b>.</div>
+  <h2>📄 Contratos pendientes <span class="cnt">${ds.length}</span></h2>
+  <div class="hint" style="margin:-4px 0 10px">Todavía no son préstamos: no cuentan como plata prestada ni generan mora. Cuando le des la plata al cliente, tocá <b>Crear préstamo</b>.${sinFirmar?` Marcá la firma vos: la app no la detecta sola.`:''}</div>
   <div class="list">${ds.map(d=>{
     const cl=client(d.clientId)||{nombre:'?'};
+    const docFirma=d.docFirmaId?S.docs.find(x=>x.id===d.docFirmaId):null;
     return `<div class="item" style="cursor:default">
       <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
       <div class="mid"><div class="t1">${esc(cl.nombre)} <span class="badge b-fut">${d.contratoTipo==='comercial'?'Comercial':'Personal'}</span></div>
         <div class="t2">${d.cuotas.length} cuotas ${FREQ[d.frecuencia].toLowerCase()} de ${fmt$(d.cuotas[0].monto)} · primer cobro ${dShort(d.inicio)}</div>
-        <div class="t2">Armado el ${dShort(ymd(new Date(d.createdAt||Date.now())))}</div>
+        <div class="t2">${d.firmado
+          ? `<span style="color:var(--green);font-weight:700">✍️ Firmado el ${dShort(ymd(new Date(d.firmadoT||d.createdAt||Date.now())))}</span>`
+            +(docFirma?` · <span class="clip" data-verfirma="${docFirma.id}">📎 ver el firmado</span>`:'')
+          : `<span style="color:var(--orange)">⏳ Sin firmar</span> · armado el ${dShort(ymd(new Date(d.createdAt||Date.now())))}`}</div>
         <div class="t2" style="margin-top:6px">
           <span class="clip" data-vercontrato="${d.id}">📄 ver contrato</span>
           · <span class="clip" data-tyc-draft="${d.id}">📲 T&C</span>
           · <span class="clip" data-editcontrato="${d.id}">✏️ editar</span>
-          · <span class="undo" data-delcontrato="${d.id}">descartar</span></div></div>
+          · <span class="undo" data-delcontrato="${d.id}">descartar</span></div>
+        <div class="t2" style="margin-top:5px">
+          <span class="clip" data-marcarfirma="${d.id}">${d.firmado?'↩️ marcar como NO firmado':'✍️ marcar como firmado'}</span>
+          · <span class="clip" data-subirfirma="${d.id}">📎 subir contrato firmado</span></div></div>
       <div class="end"><div class="m1">${fmt$(d.monto)}</div>
         <button class="btn mini" data-firmado="${d.id}" style="margin-top:6px;white-space:nowrap">✅ Crear préstamo</button></div>
-    </div>`;}).join('')}</div>`;
+    </div>`;}).join('')}</div>
+  <input type="file" id="firmafile" accept="image/*,application/pdf" style="display:none">`;
 }
 function vInicio(){
   const t=todayStr();
@@ -1951,6 +1961,8 @@ function convertirEnPrestamo(draftId){
   const sugerido=vencido?fechaPrimerCobro(f):d.inicio;
   modal(`<h3>✅ Crear el préstamo</h3>
   <div class="hint">Confirmá esto cuando <b>${esc(cl.nombre)}</b> ya firmó el contrato y le entregaste la plata. Ahí arranca a contar el préstamo.</div>
+  ${d.firmado?`<div class="resume" style="color:var(--green)">✍️ Contrato marcado como firmado el ${dShort(ymd(new Date(d.firmadoT||Date.now())))}</div>`
+    :`<div class="resume" style="color:var(--orange)">⏳ El contrato figura <b>sin firmar</b>. Si ya lo firmó, marcalo desde la lista (o subí la foto del firmado). Podés crear el préstamo igual.</div>`}
   <div class="resume">Prestás <b>${fmt$(d.monto)}</b> · devuelve <b>${fmt$(d.total)}</b><br>
     ${d.cuotas.length} cuotas ${FREQ[f].toLowerCase()} de <b>${fmt$(d.cuotas[0].monto)}</b></div>
   <label>Primer cobro</label><input id="cv-inicio" type="date" value="${sugerido}">
@@ -2482,6 +2494,20 @@ function compressImage(file){
     img.src=URL.createObjectURL(file);
   });
 }
+async function guardarFirma(d,f,cl){ // la foto del contrato firmado va a la documentación del cliente
+  let data=null,tipo=f.type;
+  if(f.type.startsWith('image/')){data=await compressImage(f);tipo='image/jpeg';}
+  else if(f.type==='application/pdf'){
+    if(f.size>880000){alert('El PDF supera 850 KB y no se puede sincronizar. Sacale una foto en su lugar.');return null;}
+    data=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.readAsDataURL(f);});
+  }else{alert('Formato no soportado (solo imágenes o PDF).');return null;}
+  if(!data){alert('No se pudo procesar el archivo.');return null;}
+  const doc={id:uid(),clientId:d.clientId,
+    nombre:'Contrato firmado · '+(cl?cl.nombre:'')+' · '+fmt$(d.monto)+' · '+dShort(todayStr()),
+    tipo,data,createdAt:Date.now()};
+  saveDoc(doc);
+  return doc;
+}
 async function subirDocs(clientId,files){
   for(const f of files){
     let data=null,tipo=f.type;
@@ -2776,6 +2802,26 @@ function bindView(){
   $$('[data-vercontrato]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.vercontrato);if(d)generarContrato(d);});
   $$('[data-tyc-draft]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.tycDraft);if(d)enviarTyC(d);});
   $$('[data-editcontrato]').forEach(b=>b.onclick=()=>formContratoPrevio(null,b.dataset.editcontrato));
+  $$('[data-verfirma]').forEach(b=>b.onclick=()=>verDoc(b.dataset.verfirma));
+  $$('[data-marcarfirma]').forEach(b=>b.onclick=()=>{
+    const d=draft(b.dataset.marcarfirma);if(!d)return;
+    if(d.firmado){d.firmado=false;delete d.firmadoT;}
+    else{d.firmado=true;d.firmadoT=Date.now();}
+    saveDraft(d);render();});
+  $$('[data-subirfirma]').forEach(b=>b.onclick=()=>{
+    const inp=$('#firmafile');if(!inp)return;
+    inp.onchange=async e=>{
+      const f=e.target.files[0]; e.target.value='';
+      if(!f)return;
+      const d=draft(b.dataset.subirfirma);if(!d)return;
+      const cl=client(d.clientId)||{nombre:'?'};
+      const doc=await guardarFirma(d,f,cl);
+      if(!doc)return;
+      d.firmado=true; d.firmadoT=Date.now(); d.docFirmaId=doc.id;
+      saveDraft(d);render();
+      alert('Contrato firmado guardado ✅\nQueda en la documentación de '+cl.nombre+'.');
+    };
+    inp.click();});
   $$('[data-firmado]').forEach(b=>b.onclick=()=>convertirEnPrestamo(b.dataset.firmado));
   $$('[data-delcontrato]').forEach(b=>b.onclick=()=>{
     const d=draft(b.dataset.delcontrato);if(!d)return;
