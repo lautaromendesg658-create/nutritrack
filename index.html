@@ -265,7 +265,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=55; // mantener a la par del número de caché en sw.js
+const APP_VER=56; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1892,6 +1892,13 @@ function formContratoPrevio(clientId,draftId){
       ${['diaria','semanal','quincenal'].map(f=>`<option value="${f}" ${d&&d.frecuencia===f?'selected':''}>${FREQ[f]}</option>`).join('')}</select></div>
     <div><label>Cant. de cuotas *</label><input id="cn-n" type="number" inputmode="numeric" placeholder="30" value="${d?d.cuotas.length:''}"></div>
   </div>
+  <div id="cn-sundiv" style="display:none"><label>Domingos</label>
+    <div class="seg" id="cn-sun">
+      <button data-v="1" class="${(d?d.skipSun!==false:true)?'on':''}">Saltar</button>
+      <button data-v="0" class="${(d?d.skipSun===false:false)?'on':''}">Cobrar</button>
+    </div>
+    <div class="hint">Elegí si el cronograma del contrato salta los domingos. Al crear el préstamo se respeta lo que elijas acá.</div>
+  </div>
   <label>Primer cobro (si firma hoy)</label><input id="cn-inicio" type="date" value="${d?d.inicio:fechaPrimerCobro('diaria')}">
   <div class="hint">Si el cliente firma más adelante, al crear el préstamo vas a poder recalcular esta fecha.</div>
   <div class="resume" id="cn-resume">Completá monto, interés y cuotas para ver el resumen.</div>
@@ -1899,16 +1906,19 @@ function formContratoPrevio(clientId,draftId){
   let tipo=d?d.contratoTipo:((cl0&&cl0.tipo==='comercio')?'comercial':'personal');
   $$('#cn-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
     $$('#cn-tipo button').forEach(x=>x.classList.toggle('on',x===b));});
-  let fechaManual=!!d;
+  let fechaManual=!!d, skipSun=d?d.skipSun!==false:true;
   $('#cn-inicio').addEventListener('input',()=>fechaManual=true);
+  $$('#cn-sun button').forEach(b=>b.onclick=()=>{skipSun=b.dataset.v==='1';
+    $$('#cn-sun button').forEach(x=>x.classList.toggle('on',x===b));upd();});
   const upd=()=>{
     const m=+$('#cn-monto').value||0,i=+$('#cn-int').value||0,n=+$('#cn-n').value||0,f=$('#cn-freq').value;
+    $('#cn-sundiv').style.display=f==='diaria'?'':'none';
     if(!m||!n){$('#cn-resume').textContent='Completá monto, interés y cuotas para ver el resumen.';return;}
     const total=Math.round(m*(1+i/100));
-    const cs=genCuotas(total,n,f,$('#cn-inicio').value||todayStr(),false);
+    const cs=genCuotas(total,n,f,$('#cn-inicio').value||todayStr(),f==='diaria'&&skipSun);
     $('#cn-resume').innerHTML=`Total a devolver: <b>${fmt$(total)}</b><br>
       ${n} cuotas ${{diaria:'diarias',semanal:'semanales',quincenal:'quincenales'}[f]} de <b>${fmt$(cs[0].monto)}</b><br>
-      Última cuota: ${dLong(cs[cs.length-1].vence)}<br>Ganancia: <b>${fmt$(total-m)}</b>`;
+      Última cuota: ${dLong(cs[cs.length-1].vence)}${f==='diaria'?` (${skipSun?'sin cobrar':'cobrando'} los domingos)`:''}<br>Ganancia: <b>${fmt$(total-m)}</b>`;
   };
   ['cn-monto','cn-int','cn-n','cn-freq','cn-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
   $('#cn-freq').addEventListener('change',()=>{
@@ -1923,8 +1933,8 @@ function formContratoPrevio(clientId,draftId){
     const cid=$('#cn-cli').value;
     const obj=d?{...d}:{id:uid(),createdAt:Date.now()};
     Object.assign(obj,{clientId:cid,tipo:tipo==='comercial'?'comercial':'personal',contratoTipo:tipo,
-      monto:m,interes:i,total,frecuencia:f,inicio:ini,
-      cuotas:genCuotas(total,n,f,ini,false)});
+      monto:m,interes:i,total,frecuencia:f,inicio:ini,skipSun,
+      cuotas:genCuotas(total,n,f,ini,f==='diaria'&&skipSun)});
     if(!d){ // el borrador queda a nombre de quien lo crea, o del socio que gestiona al cliente
       const c=client(cid);
       obj.gestorId=esSocio()?SESSION.socioId:((c&&c.gestorId)||null);
@@ -1947,10 +1957,12 @@ function convertirEnPrestamo(draftId){
   ${vencido?`<div class="hint">⚠️ La fecha del contrato (${dLong(d.inicio)}) ya pasó, así que la recalculé desde hoy. Cambiala si acordaste otra.</div>`
     :'<div class="hint">Es la fecha que figura en el contrato. Podés cambiarla si acordaron otra cosa.</div>'}
   ${f==='diaria'?`<label>Domingos</label><div class="seg" id="cv-sun">
-    <button data-v="1" class="on">Saltar</button><button data-v="0">Cobrar</button></div>`:''}
+    <button data-v="1" class="${d.skipSun!==false?'on':''}">Saltar</button>
+    <button data-v="0" class="${d.skipSun===false?'on':''}">Cobrar</button></div>
+    <div class="hint">Viene de lo que elegiste en el contrato. Cambialo solo si acordaron otra cosa.</div>`:''}
   <div class="resume" id="cv-resume"></div>
   <button class="btn" id="cv-go" style="margin-top:16px">💵 Crear el préstamo</button>`);
-  let skipSun=true;
+  let skipSun=d.skipSun!==false;
   if(f==='diaria')$$('#cv-sun button').forEach(b=>b.onclick=()=>{skipSun=b.dataset.v==='1';
     $$('#cv-sun button').forEach(x=>x.classList.toggle('on',x===b));upd();});
   const upd=()=>{
