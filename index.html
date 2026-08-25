@@ -60,6 +60,8 @@
   .item .mid{flex:1;min-width:0}
   .item .t1{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .item .t2{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* filas de acciones: se acomodan en varias líneas en vez de cortarse con "…" */
+  .item .t2.acts{white-space:normal;overflow:visible;text-overflow:clip;line-height:2}
   /* en pantallas angostas los montos del préstamo bajan a una 2da línea para no cortar nada */
   @media(max-width:620px){
     .item.loanrow{flex-wrap:wrap}
@@ -265,7 +267,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=57; // mantener a la par del número de caché en sw.js
+const APP_VER=58; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -721,10 +723,12 @@ function vPendientes(){ // contratos armados que todavía no se convirtieron en 
   const ds=vDrafts().slice().sort((a,b)=>
     (b.firmado?1:0)-(a.firmado?1:0)||(b.createdAt||0)-(a.createdAt||0)); // los firmados primero
   if(!ds.length)return '';
-  const sinFirmar=ds.filter(d=>!d.firmado).length;
+  const sinFirmar=ds.filter(d=>!d.firmado).length, firmados=ds.length-sinFirmar;
   return `
   <h2>📄 Contratos pendientes <span class="cnt">${ds.length}</span></h2>
-  <div class="hint" style="margin:-4px 0 10px">Todavía no son préstamos: no cuentan como plata prestada ni generan mora. Cuando le des la plata al cliente, tocá <b>Crear préstamo</b>.${sinFirmar?` Marcá la firma vos: la app no la detecta sola.`:''}</div>
+  <div class="hint" style="margin:-4px 0 10px">Todavía no son préstamos: no cuentan como plata prestada ni generan mora.
+  Firmar el contrato <b>no</b> lo saca de esta lista: sale cuando tocás <b>✅ Crear préstamo</b> (ya le diste la plata) o <b>🗑 descartar</b> (se cayó la operación).${sinFirmar?' La firma la marcás vos: la app no la detecta sola.':''}</div>
+  ${firmados?`<div class="resume" style="margin-bottom:8px;color:var(--green)">✍️ ${firmados} contrato${firmados===1?'':'s'} firmado${firmados===1?'':'s'} esperando que entregues la plata.</div>`:''}
   <div class="list">${ds.map(d=>{
     const cl=client(d.clientId)||{nombre:'?'};
     const docFirma=d.docFirmaId?S.docs.find(x=>x.id===d.docFirmaId):null;
@@ -736,14 +740,13 @@ function vPendientes(){ // contratos armados que todavía no se convirtieron en 
           ? `<span style="color:var(--green);font-weight:700">✍️ Firmado el ${dShort(ymd(new Date(d.firmadoT||d.createdAt||Date.now())))}</span>`
             +(docFirma?` · <span class="clip" data-verfirma="${docFirma.id}">📎 ver el firmado</span>`:'')
           : `<span style="color:var(--orange)">⏳ Sin firmar</span> · armado el ${dShort(ymd(new Date(d.createdAt||Date.now())))}`}</div>
-        <div class="t2" style="margin-top:6px">
+        <div class="t2 acts" style="margin-top:6px">
           <span class="clip" data-vercontrato="${d.id}">📄 ver contrato</span>
           · <span class="clip" data-tyc-draft="${d.id}">📲 T&C</span>
           · <span class="clip" data-editcontrato="${d.id}">✏️ editar</span>
-          · <span class="undo" data-delcontrato="${d.id}">descartar</span></div>
-        <div class="t2" style="margin-top:5px">
-          <span class="clip" data-marcarfirma="${d.id}">${d.firmado?'↩️ marcar como NO firmado':'✍️ marcar como firmado'}</span>
-          · <span class="clip" data-subirfirma="${d.id}">📎 subir contrato firmado</span></div></div>
+          · <span class="clip" data-marcarfirma="${d.id}">${d.firmado?'↩️ marcar sin firmar':'✍️ marcar firmado'}</span>
+          · <span class="clip" data-subirfirma="${d.id}">📎 subir firmado</span>
+          · <span class="undo" data-delcontrato="${d.id}">🗑 descartar</span></div></div>
       <div class="end"><div class="m1">${fmt$(d.monto)}</div>
         <button class="btn mini" data-firmado="${d.id}" style="margin-top:6px;white-space:nowrap">✅ Crear préstamo</button></div>
     </div>`;}).join('')}</div>
