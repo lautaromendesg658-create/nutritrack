@@ -81,6 +81,9 @@
   .balgrid .bl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.3px}
   .rephdr:active{background:var(--panel-2)}
   .repbox{background:var(--panel-2);border-bottom:1px solid var(--line)}
+  /* cuotas desplegadas dentro del grupo de un cliente: sangradas y sin repetir su inicial */
+  .repbox .item{padding-left:24px;border-bottom:none;border-top:1px solid var(--line)}
+  .repbox .item>.ava{display:none}
   .repsub{display:flex;align-items:center;gap:12px;padding:11px 14px 11px 24px;border-top:1px solid var(--line);cursor:pointer}
   .repsub:active{background:var(--bg)}
   .repsub .mid{flex:1;min-width:0}
@@ -267,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=58; // mantener a la par del número de caché en sw.js
+const APP_VER=59; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -672,7 +675,7 @@ setInterval(tickClock,1000);tickClock();
 setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
 
 /* ================= NAVEGACIÓN ================= */
-let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencSort='atraso';
+let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), vencSort='atraso';
 $$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
 $('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
 function go(v,detail){VIEW=v;DETAIL=detail||null;render();}
@@ -717,6 +720,29 @@ function sortVenc(arr,mode){
   else if(mode==='monto')a.sort((x,y)=>monto(y)-monto(x));
   else if(mode==='cliente')a.sort((x,y)=>nom(x)<nom(y)?-1:nom(x)>nom(y)?1:(x.c.vence<y.c.vence?-1:1));
   else a.sort((x,y)=>x.c.vence<y.c.vence?-1:x.c.vence>y.c.vence?1:0); // 'atraso': más viejo primero
+  return a;
+}
+function agruparPorCliente(arr){ // una fila por cliente, con todas sus cuotas adentro
+  const map={};
+  arr.forEach(x=>{const id=x.l.clientId;
+    if(!map[id])map[id]={id,cl:client(id)||{nombre:'?'},items:[],total:0,extra:0,loans:new Set()};
+    const g=map[id];
+    g.items.push(x); g.loans.add(x.l.id);
+    g.total+=cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c);
+    g.extra+=moraDe(x.c)+cobradorDe(x.c);});
+  return Object.values(map).map(g=>{
+    g.items.sort((a,b)=>a.c.vence<b.c.vence?-1:1);
+    g.vieja=g.items[0].c.vence;
+    g.nueva=g.items[g.items.length-1].c.vence;
+    g.atraso=Math.max(...g.items.map(x=>diasAtraso(x.c)));
+    return g;});
+}
+function sortGrupos(gs,mode){
+  const a=[...gs];
+  if(mode==='reciente')a.sort((x,y)=>x.nueva<y.nueva?1:x.nueva>y.nueva?-1:0);
+  else if(mode==='monto')a.sort((x,y)=>y.total-x.total);
+  else if(mode==='cliente')a.sort((x,y)=>x.cl.nombre.toLowerCase().localeCompare(y.cl.nombre.toLowerCase()));
+  else a.sort((x,y)=>x.vieja<y.vieja?-1:x.vieja>y.vieja?1:0); // 'atraso': el más viejo primero
   return a;
 }
 function vPendientes(){ // contratos armados que todavía no se convirtieron en préstamo
@@ -807,13 +833,14 @@ function vInicio(){
     ${Object.entries(porSocio).map(([nom,v])=>repRow('s:'+nom,ini(nom),'shop',nom,v.real,v.total,'var(--blue)',v.loans)).join('')}
   </div>`:'';
 
-  const rowCobro=({l,c})=>{
+  // dentro de un grupo mostramos la cuota sola; suelta, el nombre del cliente
+  const rowCobro=({l,c},enGrupo)=>{
     const cl=client(l.clientId)||{nombre:'?'}, est=estadoCuota(c);
     const extra=moraDe(c)+cobradorDe(c);
     return `<div class="item" data-cobrar="${l.id}|${c.n}">
       <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
-      <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
-        <div class="t2">Cuota ${c.n}/${l.cuotas.length} · vence ${dShort(c.vence)}${diasAtraso(c)>0?' · <span style="color:var(--red)">'+diasAtraso(c)+'d atraso</span>':''}</div></div>
+      <div class="mid"><div class="t1">${enGrupo?'Cuota '+c.n+'/'+l.cuotas.length+' · préstamo de '+fmt$(l.monto):esc(cl.nombre)}</div>
+        <div class="t2">${enGrupo?'vence':'Cuota '+c.n+'/'+l.cuotas.length+' · vence'} ${dShort(c.vence)}${diasAtraso(c)>0?' · <span style="color:var(--red)">'+diasAtraso(c)+'d atraso</span>':''}</div></div>
       <div class="end"><div class="m1">${fmt$(cRestante(c)+extra)}</div>
         ${extra>0?`<div class="m2" style="color:var(--orange)">incl. ${fmt$(extra)} mora${cobradorDe(c)>0?'+cobrador':''}</div>`:`<div class="m2">${FREQ[l.frecuencia]}</div>`}</div>
     </div>`;};
@@ -840,14 +867,23 @@ function vInicio(){
   ${vPendientes()}
   ${repartoHTML}
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
-  <div class="list">${hoy.length?hoy.map(rowCobro).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
+  <div class="list">${hoy.length?hoy.map(x=>rowCobro(x)).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
   <h2>🔴 Vencidos <span class="cnt">${venc.length}</span></h2>
   ${venc.length?`<div class="chips">
     ${[['atraso','⏳ Más atrasado'],['reciente','🆕 Reciente'],['monto','💵 Mayor monto'],['cliente','🔤 A-Z cliente']].map(([k,t])=>
       `<button class="${vencSort===k?'on':''}" data-vs="${k}">${t}</button>`).join('')}
   </div>`:''}
-  <div class="list">${venc.length?sortVenc(venc,vencSort).slice(0,40).map(rowCobro).join(''):'<div class="empty">Nada vencido. ¡Todo al día! 🎉</div>'}</div>
-  ${venc.length>40?'<div class="hint" style="text-align:center">Mostrando los primeros 40 de '+venc.length+'.</div>':''}`;
+  <div class="list">${venc.length?sortGrupos(agruparPorCliente(venc),vencSort).slice(0,40).map(g=>{
+    const open=vencOpen.has(g.id), varios=g.loans.size>1;
+    return `<div class="item rephdr" data-vg="${g.id}" style="cursor:pointer">
+      <div class="ava ${g.cl.tipo==='comercio'?'shop':''}">${esc(ini(g.cl.nombre))}</div>
+      <div class="mid"><div class="t1">${esc(g.cl.nombre)} <span class="chev">${open?'▾':'▸'}</span></div>
+        <div class="t2">${g.items.length} cuota${g.items.length===1?'':'s'} vencida${g.items.length===1?'':'s'}${varios?` · ${g.loans.size} préstamos`:''} · ${g.atraso} día${g.atraso===1?'':'s'} de atraso</div>
+        ${g.extra>0?`<div class="t2" style="color:var(--orange)">incl. ${fmt$(g.extra)} mora+cobrador</div>`:''}</div>
+      <div class="end"><div class="m1" style="color:var(--red)">${fmt$(g.total)}</div><div class="m2">debe</div></div>
+    </div>${open?`<div class="repbox">${g.items.map(x=>rowCobro(x,varios)).join('')}</div>`:''}`;
+  }).join(''):'<div class="empty">Nada vencido. ¡Todo al día! 🎉</div>'}</div>
+  ${venc.length?`<div class="hint" style="text-align:center">${venc.length} cuota${venc.length===1?'':'s'} de ${agruparPorCliente(venc).length} cliente${agruparPorCliente(venc).length===1?'':'s'}. Tocá un cliente para ver y cobrar sus cuotas.</div>`:''}`;
 }
 function ini(n){return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();}
 
@@ -2788,6 +2824,8 @@ function bindView(){
   $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
   $$('[data-vs]').forEach(b=>b.onclick=()=>{vencSort=b.dataset.vs;render();});
   $$('[data-cg]').forEach(b=>b.onclick=()=>{cliGestor=b.dataset.cg;render();});
+  $$('[data-vg]').forEach(b=>b.onclick=()=>{const k=b.dataset.vg;
+    vencOpen.has(k)?vencOpen.delete(k):vencOpen.add(k);render();});
   $$('[data-cal]').forEach(b=>b.onclick=()=>{calRef=new Date(calRef.getFullYear(),calRef.getMonth()+ +b.dataset.cal,1);render();});
   $$('[data-day]').forEach(b=>b.onclick=()=>{calSel=b.dataset.day;render();});
   $$('[data-edit-cli]').forEach(b=>b.onclick=()=>formCliente(b.dataset.editCli));
