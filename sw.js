@@ -1,4 +1,4 @@
-const CACHE='prestacontrol-v59';
+const CACHE='prestacontrol-v60';
 const ASSETS=['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png','./icon-180.png','./jspdf.umd.min.js'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));

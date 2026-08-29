@@ -270,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=59; // mantener a la par del número de caché en sw.js
+const APP_VER=60; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -373,9 +373,11 @@ function cTotalRecibido(c){ // toda la plata que entró por esta cuota: cuota + 
 function cMoraPagada(c){return (c.pagos||[]).reduce((a,p)=>a+(p.mora||0),0);}
 function cCobradorPagado(c){return (c.pagos||[]).reduce((a,p)=>a+(p.cobrador||0),0);}
 function cRestante(c){return Math.max(0,c.monto-cPagadoBase(c));}
-function diasAtraso(c){ // días HÁBILES de mora (los días no laborables configurados no cuentan)
+// asOf: momento desde el cual medir el atraso. Sirve para registrar un cobro con fecha
+// pasada y que la mora sea la que corría ESE día, no la de hoy. Sin él, mide hasta ahora.
+function diasAtraso(c,asOf){ // días HÁBILES de mora (los días no laborables configurados no cuentan)
   if(cRestante(c)<=0)return 0;
-  const now=Date.now(), hl=S.settings.horaLimite??18;
+  const now=asOf||Date.now(), hl=S.settings.horaLimite??18;
   const noLab=S.settings.diasNoLaborables||[];
   const[Y,M,D]=c.vence.split('-').map(Number);
   let d=new Date(Y,M-1,D), count=0, guard=0;
@@ -387,17 +389,24 @@ function diasAtraso(c){ // días HÁBILES de mora (los días no laborables confi
   }
   return count;
 }
-function moraDe(c){ // mora pendiente de cobro
-  const d=diasAtraso(c); if(d<=0)return 0;
+function moraDe(c,asOf){ // mora pendiente de cobro
+  const d=diasAtraso(c,asOf); if(d<=0)return 0;
   const m=S.settings.mora;
   let base=m.tipo==='pct'?c.monto*m.valor/100:Number(m.valor)||0;
   let tot=m.porDia?base*d:base;
   return Math.max(0,Math.round(tot)-cMoraPagada(c));
 }
-function cobradorDe(c){ // cargo de cobrador pendiente
-  const d=diasAtraso(c);
+function cobradorDe(c,asOf){ // cargo de cobrador pendiente
+  const d=diasAtraso(c,asOf);
   if(d<= (S.settings.cobrador.dias||3))return 0;
   return Math.max(0,Math.round(Number(S.settings.cobrador.monto)||0)-cCobradorPagado(c));
+}
+// momento a usar para medir la mora de un cobro fechado: hoy → ahora; un día pasado → su mediodía,
+// antes de la hora límite, así el día del pago no suma un día más de atraso
+function momentoDe(fecha){
+  if(!fecha||fecha===todayStr())return Date.now();
+  const[Y,M,D]=fecha.split('-').map(Number);
+  return new Date(Y,M-1,D,12,0,0).getTime();
 }
 function estadoCuota(c){
   if(cRestante(c)<=0)return 'pagada';
@@ -2375,23 +2384,30 @@ function formCobro(loanId,nCuota,alVolver){
   const l=loan(loanId);if(!l)return;
   const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
   const cl=client(l.clientId)||{nombre:'?'};
-  const rest=cRestante(c),mora=moraDe(c),cob=cobradorDe(c),atr=diasAtraso(c);
+  const rest=cRestante(c);
+  let mora=moraDe(c),cob=cobradorDe(c),atr=diasAtraso(c); // se recalculan si cambia la fecha del pago
   const yaPago=cPagadoBase(c);
   const debeTotal=rest+mora+cob;
   modal(`<h3>Cobrar cuota ${c.n}/${l.cuotas.length}</h3>
   <div class="hint">${esc(cl.nombre)} · vencía el ${dLong(c.vence)}${atr>0?` · <span style="color:var(--red)">${atr} día${atr>1?'s':''} de mora</span>`:''}
   ${yaPago>0?`<br>Cuota de ${fmt$(c.monto)} · ya cubrió ${fmt$(yaPago)} de la cuota${cTotalRecibido(c)!==yaPago?` (te pagó ${fmt$(cTotalRecibido(c))} en total, ${fmt$(cTotalRecibido(c)-yaPago)} fue a mora/cobrador)`:''}`:''}
-  <br>Debe ahora: <b style="color:var(--gold)">${fmt$(debeTotal)}</b>
-  <span style="font-size:11px">(cuota ${fmt$(rest)}${mora>0?' + mora '+fmt$(mora):''}${cob>0?' + cobrador '+fmt$(cob):''})</span></div>
+  <span id="co-debe"><br>Debe ahora: <b style="color:var(--gold)">${fmt$(debeTotal)}</b>
+  <span style="font-size:11px">(cuota ${fmt$(rest)}${mora>0?' + mora '+fmt$(mora):''}${cob>0?' + cobrador '+fmt$(cob):''})</span></span></div>
+  <label>¿Cuándo te pagó?</label>
+  <input id="co-fecha" type="date" value="${todayStr()}" max="${todayStr()}">
+  <div class="hint" id="co-fechahint">Por defecto hoy. Si te pagó otro día, ponelo: la mora se recalcula a esa fecha.</div>
   <label>Tipo de pago</label>
   <div class="seg" id="co-tipo">
-    <button data-v="total" class="on">✅ Pagó todo (${fmt$(debeTotal)})</button>
+    <button data-v="total" class="on">✅ Pagó todo</button>
     <button data-v="parcial">✂️ Pago parcial</button>
   </div>
   <label>Total que te pagó</label>
   <input id="co-recibido" type="number" inputmode="decimal" value="${debeTotal}">
   <div class="hint" id="co-queda"></div>
-  ${mora>0?'<button class="btn sec mini" id="co-condonar" style="margin-top:8px">🤝 Condonar la mora</button>':''}
+  <div class="btnrow" style="margin-top:8px">
+    <button class="btn sec mini" id="co-condonar" style="${mora>0?'':'display:none'}">🤝 Condonar mora</button>
+    <button class="btn sec mini" id="co-condcob" style="${cob>0?'':'display:none'}">🤝 Condonar cobrador</button>
+  </div>
   <details id="co-adv" style="margin-top:12px">
     <summary>Ajustar el reparto a mano</summary>
     <label>A la cuota</label><input id="co-base" type="number" inputmode="decimal" value="${rest}">
@@ -2411,18 +2427,19 @@ function formCobro(loanId,nCuota,alVolver){
     $('#mx').onclick=volver;
     $('#ovl').onclick=e=>{if(e.target.id==='ovl')volver();};
   }
-  let moraACobrar=mora;
+  let moraACobrar=mora, cobACobrar=cob, condMora=false, condCob=false;
   // reparte lo que te pagó: primero la mora, después el cobrador, y lo que sobra a la cuota
   const repartir=r=>{
     r=Math.max(0,r);
     const m=Math.min(r,moraACobrar); r-=m;
-    const cb=Math.min(r,cob); r-=cb;
+    const cb=Math.min(r,cobACobrar); r-=cb;
     return {base:r,mora:m,cobrador:cb};
   };
+  const totalEsperado=()=>rest+moraACobrar+cobACobrar;
   const pintarDesglose=()=>{
     const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
     $('#co-total').textContent=fmt$(base+m+cb);
-    const quedaCuota=Math.max(0,rest-base), quedaMora=Math.max(0,moraACobrar-m), quedaCob=Math.max(0,cob-cb);
+    const quedaCuota=Math.max(0,rest-base), quedaMora=Math.max(0,moraACobrar-m), quedaCob=Math.max(0,cobACobrar-cb);
     const debeDespues=quedaCuota+quedaMora+quedaCob, q=$('#co-queda');
     const partes=[];
     if(m>0)partes.push(`mora ${fmt$(m)}`);
@@ -2445,23 +2462,50 @@ function formCobro(loanId,nCuota,alVolver){
   };
   $$('#co-tipo button').forEach(b=>b.onclick=()=>{
     $$('#co-tipo button').forEach(x=>x.classList.toggle('on',x===b));
-    if(b.dataset.v==='total')$('#co-recibido').value=rest+moraACobrar+cob;
+    if(b.dataset.v==='total')$('#co-recibido').value=totalEsperado();
     else{$('#co-recibido').value='';$('#co-recibido').focus();}
     aplicarRecibido();
   });
   $('#co-recibido').oninput=()=>{
     aplicarRecibido();
-    const r=+$('#co-recibido').value||0, esTotal=r>=rest+moraACobrar+cob;
+    const r=+$('#co-recibido').value||0, esTotal=r>=totalEsperado();
     $$('#co-tipo button').forEach(b=>b.classList.toggle('on',b.dataset.v===(esTotal?'total':'parcial')));
+  };
+  // cambiar la fecha del pago recalcula la mora y el cobrador como estaban ESE día
+  $('#co-fecha').onchange=()=>{
+    const f=$('#co-fecha').value||todayStr();
+    if(f>todayStr()){alert('No se puede registrar un cobro con fecha futura.');$('#co-fecha').value=todayStr();return;}
+    const asOf=momentoDe(f);
+    const m2=moraDe(c,asOf), cb2=cobradorDe(c,asOf), a2=diasAtraso(c,asOf);
+    const cambio=(m2!==mora||cb2!==cob);
+    mora=m2; cob=cb2; atr=a2;
+    if(!condMora)moraACobrar=m2;
+    if(!condCob)cobACobrar=cb2;
+    $('#co-condonar').style.display=m2>0&&!condMora?'':'none';
+    $('#co-condcob').style.display=cb2>0&&!condCob?'':'none';
+    $('#co-debe').innerHTML=`<br>Debe ${f===todayStr()?'ahora':'al '+dShort(f)}: <b style="color:var(--gold)">${fmt$(rest+moraACobrar+cobACobrar)}</b>`
+      +` <span style="font-size:11px">(cuota ${fmt$(rest)}${moraACobrar>0?' + mora '+fmt$(moraACobrar):''}${cobACobrar>0?' + cobrador '+fmt$(cobACobrar):''})</span>`;
+    $('#co-fechahint').innerHTML=f===todayStr()
+      ?'Por defecto hoy. Si te pagó otro día, ponelo: la mora se recalcula a esa fecha.'
+      :`Se registra con fecha <b>${dLong(f)}</b> (${a2} día${a2===1?'':'s'} de atraso a esa fecha).`
+        +(cambio?` La mora quedó en <b>${fmt$(m2)}</b> en vez de la de hoy.`:'');
+    if($$('#co-tipo button.on')[0]&&$$('#co-tipo button.on')[0].dataset.v==='total')
+      $('#co-recibido').value=totalEsperado();
+    aplicarRecibido();
   };
   ['co-base','co-mora','co-cob'].forEach(x=>$('#'+x).oninput=()=>{ // reparto manual: el total sigue la suma
     $('#co-recibido').value=(+$('#co-base').value||0)+(+$('#co-mora').value||0)+(+$('#co-cob').value||0);
     pintarDesglose();
   });
-  const cond=$('#co-condonar');if(cond)cond.onclick=()=>{
-    moraACobrar=0; $('#co-mora').value=0;
-    $('#co-recibido').value=rest+cob; aplicarRecibido();
-    cond.textContent='🤝 Mora condonada'; cond.disabled=true;
+  $('#co-condonar').onclick=()=>{
+    condMora=true; moraACobrar=0; $('#co-mora').value=0;
+    $('#co-recibido').value=totalEsperado(); aplicarRecibido();
+    $('#co-condonar').textContent='🤝 Mora condonada'; $('#co-condonar').disabled=true;
+  };
+  $('#co-condcob').onclick=()=>{
+    condCob=true; cobACobrar=0; $('#co-cob').value=0;
+    $('#co-recibido').value=totalEsperado(); aplicarRecibido();
+    $('#co-condcob').textContent='🤝 Cobrador condonado'; $('#co-condcob').disabled=true;
   };
   pintarDesglose();
   let coFile=null;
@@ -2474,11 +2518,13 @@ function formCobro(loanId,nCuota,alVolver){
     const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
     if(base+m+cb<=0)return alert('El monto debe ser mayor a 0');
     if(base>rest&&!confirm('Estás cobrando más que lo que resta de la cuota. ¿Continuar?'))return;
-    const pago={t:Date.now(),monto:base,mora:m,cobrador:cb};
+    const fPago=$('#co-fecha').value||todayStr();
+    if(fPago>todayStr())return alert('No se puede registrar un cobro con fecha futura.');
+    const pago={t:momentoDe(fPago),monto:base,mora:m,cobrador:cb};
     if(coFile){
       const data=await compressImage(coFile);
       if(data){
-        const d={id:uid(),clientId:l.clientId,nombre:'Comprobante cuota '+c.n+'/'+l.cuotas.length+' · '+dShort(todayStr()),tipo:'image/jpeg',data,createdAt:Date.now()};
+        const d={id:uid(),clientId:l.clientId,nombre:'Comprobante cuota '+c.n+'/'+l.cuotas.length+' · '+dShort(fPago),tipo:'image/jpeg',data,createdAt:Date.now()};
         saveDoc(d);pago.comprobante=d.id;
       }else alert('No se pudo procesar la imagen del comprobante. El cobro se registra igual.');
     }
@@ -2486,9 +2532,10 @@ function formCobro(loanId,nCuota,alVolver){
     saveLoan(l);closeModal();render();
     const queda=cRestante(c);
     const tel=(cl.telefono||'').replace(/\D/g,'');
+    const cuando=fPago===todayStr()?'':`\nRegistrado con fecha ${dLong(fPago)}.`;
     const aviso=queda>0
-      ? `Pago parcial registrado ✅\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).\n\n¿Enviar comprobante por WhatsApp?`
-      : 'Cobro registrado ✅\n¿Enviar comprobante por WhatsApp?';
+      ? `Pago parcial registrado ✅${cuando}\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).\n\n¿Enviar comprobante por WhatsApp?`
+      : `Cobro registrado ✅${cuando}\n¿Enviar comprobante por WhatsApp?`;
     if(tel&&confirm(aviso)){
       const msg=`Hola ${cl.nombre}! Te confirmamos el pago de ${fmt$(base+m+cb)} (cuota ${c.n}/${l.cuotas.length}). `+
         (queda>0?`Queda pendiente ${fmt$(queda)} de esta cuota, que sigue generando mora hasta cancelarse. `:'')+
