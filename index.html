@@ -270,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=60; // mantener a la par del número de caché en sw.js
+const APP_VER=61; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -2665,7 +2665,7 @@ function aplicarRol(){ // el socio no ve las pantallas de administración del ne
   const lbl=document.querySelector('.tabs button[data-v="ajustes"]');
   if(lbl)lbl.childNodes[1].nodeValue=esSocio()?'Mi cuenta':'Ajustes';
 }
-function conectarDesdeLogin(){ // para un socio (o un dispositivo nuevo) que todavía no bajó los datos
+function conectarDesdeLogin(volverA){ // para un socio (o un dispositivo nuevo) que todavía no bajó los datos
   const raw=prompt('Pegá la configuración de Firebase que te pasó el dueño (el bloque que empieza con {):');
   if(!raw)return;
   let cfg;
@@ -2677,26 +2677,32 @@ function conectarDesdeLogin(){ // para un socio (o un dispositivo nuevo) que tod
   localStorage.setItem(LS+'-fb',JSON.stringify({config:cfg,code:code.trim()}));
   alert('Conectando… Cuando termine de bajar los datos vas a poder entrar con el usuario y la contraseña que te dieron.');
   fbConnect();
-  setTimeout(()=>{if(!UNLOCKED)showLock();},4000); // refresca la pantalla ya con los accesos bajados
+  setTimeout(()=>{if(!UNLOCKED)showLock(volverA);},4000); // refresca la pantalla ya con los accesos bajados
 }
-function showLock(){
+// modo: 'crear' fuerza el alta del dueño en este dispositivo, 'login' fuerza la pantalla de ingreso.
+// Sin modo, se decide sola. Es importante que 'crear' siga siendo alcanzable aunque el dispositivo
+// ya haya bajado los accesos de los socios: si no, el dueño queda afuera de su propia app.
+function showLock(modo){
   UNLOCKED=false;sessionStorage.removeItem('pc-unlocked');
   closeModal(); // que ningún modal quede visible sobre el login
   $$('.cview').forEach(v=>v.remove()); // ni el visor de contratos (datos del cliente)
   const a=getAuth(),lk=$('#lock');
   lk.classList.add('show');
   const hayCuentas=cuentasSocio().length>0;
-  if(!a&&!hayCuentas){
+  const crear=modo==='crear'||(!modo&&!a&&!hayCuentas);
+  if(crear){
     lk.innerHTML=`<div class="lockbox">
-      <div class="logo"><div class="ic">💰</div><h1>PrestaControl</h1><div class="sub">Creá tu acceso privado</div></div>
+      <div class="logo"><div class="ic">💰</div><h1>PrestaControl</h1><div class="sub">${a?'Cambiar tu acceso en este dispositivo':'Creá tu acceso privado'}</div></div>
+      ${hayCuentas?'<div class="hint" style="margin-top:0">Este es el acceso del <b>dueño</b> para este dispositivo. Vale solo acá: no cambia el de tu celular ni el de los socios, y no toca ningún dato.</div>':''}
       <label>Elegí un usuario</label><input id="lk-user" autocomplete="username">
       <label>Elegí una contraseña</label><input id="lk-pass" type="password" autocomplete="new-password">
       <label>Repetí la contraseña</label><input id="lk-pass2" type="password" autocomplete="new-password">
       <div class="hint">⚠️ Guardala bien: si la olvidás, la única salida es borrar los datos de este dispositivo (lo sincronizado en la nube se recupera reconectando).</div>
-      <button class="btn" id="lk-create" style="margin-top:16px">Crear cuenta</button>
+      <button class="btn" id="lk-create" style="margin-top:16px">${a?'Guardar acceso':'Crear cuenta'}</button>
       <div class="lockerr" id="lk-err"></div>
-      <div class="lockfoot"><button id="lk-sync">¿Te dieron un acceso? Conectá el negocio</button></div>
+      <div class="lockfoot"><button id="lk-sync">¿Te dieron un acceso? Conectá el negocio</button>${(a||hayCuentas)?' · <button id="lk-back">Volver al ingreso</button>':''}</div>
     </div>`;
+    {const b=$('#lk-back');if(b)b.onclick=()=>showLock('login');}
     $('#lk-create').onclick=async()=>{
       const u=$('#lk-user').value.trim(),p=$('#lk-pass').value,p2=$('#lk-pass2').value;
       if(!u)return $('#lk-err').textContent='Elegí un usuario';
@@ -2704,7 +2710,7 @@ function showLock(){
       if(p!==p2)return $('#lk-err').textContent='Las contraseñas no coinciden';
       await setAuth(u,p);unlockApp({rol:'dueno',socioId:null,nombre:u});
     };
-    $('#lk-sync').onclick=conectarDesdeLogin;
+    $('#lk-sync').onclick=()=>conectarDesdeLogin('crear');
   }else{
     lk.innerHTML=`<div class="lockbox">
       <div class="logo"><div class="ic">🔒</div><h1>PrestaControl</h1><div class="sub">Acceso privado</div></div>
@@ -2712,7 +2718,8 @@ function showLock(){
       <label>Contraseña</label><input id="lk-pass" type="password" autocomplete="current-password">
       <button class="btn" id="lk-go" style="margin-top:16px">🔓 Ingresar</button>
       <div class="lockerr" id="lk-err"></div>
-      <div class="lockfoot"><button id="lk-forgot">¿Olvidaste tu contraseña?</button>${!a?' · <button id="lk-sync">Conectar otro negocio</button>':''}</div>
+      ${!a?'<div class="hint">En este dispositivo todavía no creaste tu acceso de dueño. Si sos el dueño, tocá <b>Soy el dueño</b> acá abajo.</div>':''}
+      <div class="lockfoot"><button id="lk-forgot">¿Olvidaste tu contraseña?</button>${!a?' · <button id="lk-owner">Soy el dueño</button> · <button id="lk-sync">Conectar otro negocio</button>':''}</div>
     </div>`;
     const go=async()=>{
       const u=$('#lk-user').value.trim(),p=$('#lk-pass').value;
@@ -2722,10 +2729,13 @@ function showLock(){
         const soc=(S.settings.socios||[]).find(x=>x.id===cta.socioId);
         return unlockApp({rol:'socio',socioId:cta.socioId,nombre:soc?soc.nombre:u});
       }
-      $('#lk-err').textContent='Usuario o contraseña incorrectos';$('#lk-pass').value='';
+      $('#lk-err').innerHTML=a?'Usuario o contraseña incorrectos'
+        :'Usuario o contraseña incorrectos.<br>Acá solo entran los accesos de socio. Si sos el dueño, tocá <b>Soy el dueño</b> abajo para crear tu acceso en este dispositivo.';
+      $('#lk-pass').value='';
     };
     $('#lk-go').onclick=go;
-    {const b=$('#lk-sync');if(b)b.onclick=conectarDesdeLogin;}
+    {const b=$('#lk-owner');if(b)b.onclick=()=>showLock('crear');}
+    {const b=$('#lk-sync');if(b)b.onclick=()=>conectarDesdeLogin();}
     $('#lk-pass').onkeydown=e=>{if(e.key==='Enter')go();};
     $('#lk-user').focus();
     $('#lk-forgot').onclick=()=>{
