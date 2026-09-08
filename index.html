@@ -270,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=61; // mantener a la par del número de caché en sw.js
+const APP_VER=62; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -584,6 +584,31 @@ async function revivir(t){
     if(!obj.data){alert('El documento "'+(obj.nombre||'')+'" se restaura sin la imagen: no está en este dispositivo y no hay conexión con la nube.');}
     const i=S.docs.findIndex(x=>x.id===obj.id);
     if(i<0)S.docs.push(obj);else S.docs[i]=obj; idbPut(obj); fbPush('doc',obj);}
+}
+// Al renovar, el saldo pendiente se descuenta de lo que se le entrega al cliente: en los hechos
+// esas cuotas se cobran en ese momento. Se registran como pagos reales para que cuenten en el
+// balance, en la ganancia y en el calendario, en vez de quedar como "renovadas" sin cobrar.
+function saldarPorRenovacion(v,cuando){
+  let n=0,total=0;
+  (v.cuotas||[]).forEach(c=>{
+    const r=cRestante(c); if(r<=0)return;
+    c.pagos=c.pagos||[];
+    c.pagos.push({t:cuando||Date.now(),monto:r,mora:0,cobrador:0,renov:true});
+    n++; total+=r;
+  });
+  return {n,total};
+}
+// arrastre para las renovaciones hechas antes de que existiera lo de arriba
+function migrarRenovaciones(){
+  let n=0,total=0,loans=0;
+  (S.loans||[]).forEach(v=>{
+    if(v.status!=='renovado')return;
+    const nuevo=(S.loans||[]).find(x=>x.renovadoDe===v.id);
+    const r=saldarPorRenovacion(v,(nuevo&&nuevo.createdAt)||v.updatedAt||Date.now());
+    if(r.n){loans++;n+=r.n;total+=r.total;touch(v);fbPush('loan',v);}
+  });
+  if(loans)persist();
+  return {loans,n,total};
 }
 function saveSettings(){touch(S.settings);persist();fbPushSettings();applyBiz();}
 
@@ -1088,6 +1113,7 @@ function vPrestamo(id){
       :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>')
       +(parcial&&!esRenov?'<span class="badge b-cob">parcial</span>':'');
     const pagosTxt=(c.pagos||[]).map(p=>fmt$((p.monto||0)+(p.mora||0)+(p.cobrador||0))+' el '+new Date(p.t).toLocaleDateString('es-AR',{day:'numeric',month:'short'})
+      +(p.renov?' <span style="color:var(--gold)">🔄 saldado con la renovación</span>':'')
       +(p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` <span class="clip" data-doc="${p.comprobante}">📎 comprobante</span>`:'')
       +(esRenov?'':` <span class="undo" data-undo="${l.id}|${c.n}|${p.t}" title="deshacer este cobro">✕</span>`)).join(', ');
     return `<div class="cuota ${cls}">
@@ -1637,7 +1663,7 @@ function vCalendario(){
       return `<div class="item" data-loan="${l.id}">
         <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
         <div class="mid"><div class="t1">${esc(cl.nombre)}${l.status==='renovado'?' <span class="badge b-com">renovado</span>':''}</div>
-          <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${new Date(p.t).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} hs${extras.length?' · '+extras.join(' · '):''}
+          <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${p.renov?'🔄 saldado con la renovación':new Date(p.t).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+' hs'}${extras.length?' · '+extras.join(' · '):''}
           ${p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` · <span class="clip" data-doc="${p.comprobante}">📎</span>`:''}
           ${l.status==='renovado'?'':` · <span class="undo" data-undo="${l.id}|${c.n}|${p.t}" title="deshacer este cobro">✕ deshacer</span>`}</div></div>
         <div class="end"><div class="m1" style="color:var(--green)">${fmt$(tot)}</div><div class="m2">cobrado</div></div>
@@ -2255,7 +2281,12 @@ function formRenovar(viejoId){
     // hereda el reparto del préstamo anterior
     if(v.gestorId&&v.gestorPct){nuevo.gestorId=v.gestorId;nuevo.gestorPct=v.gestorPct;nuevo.gestorNombre=v.gestorNombre||socioNombre(v.gestorId);}
     saveLoan(nuevo);
-    if(saldar){v.status='renovado';v.renovadoEn=nuevo.id;touch(v);persist();fbPush('loan',v);}
+    if(saldar){
+      // el saldo se descontó de la plata que le entregaste: esas cuotas quedan COBRADAS hoy,
+      // así entran en el balance y en la ganancia en vez de quedar en el limbo
+      saldarPorRenovacion(v,nuevo.createdAt);
+      v.status='renovado';v.renovadoEn=nuevo.id;touch(v);persist();fbPush('loan',v);
+    }
     closeModal();go('prestamos',nuevo.id);
   };
 }
@@ -2658,6 +2689,19 @@ function unlockApp(sesion){
   UNLOCKED=true;sessionStorage.setItem('pc-unlocked','1');
   $('#lock').classList.remove('show');$('#lock').innerHTML='';
   aplicarRol(); applyBiz();render();fbConnect();
+  if(!esSocio())setTimeout(revisarRenovacionesViejas,1200); // y de nuevo cuando baje la nube
+  if(!esSocio())setTimeout(revisarRenovacionesViejas,7000);
+}
+let _migRenovAviso=false;
+function revisarRenovacionesViejas(){
+  const r=migrarRenovaciones();
+  if(!r.loans)return;
+  render();
+  if(_migRenovAviso)return; _migRenovAviso=true;
+  alert(`Renovaciones puestas al día ✅\n\n`
+    +`${r.loans} préstamo(s) renovado(s) tenían ${r.n} cuota(s) sin registrar por ${fmt$(r.total)}.\n\n`
+    +`Como ese saldo se descontó de la plata que le entregaste al cliente, ahora figuran como cobradas `
+    +`en la fecha de la renovación, y entran en el balance y en la ganancia.`);
 }
 function aplicarRol(){ // el socio no ve las pantallas de administración del negocio
   const t=document.querySelector('.tabs button[data-v="ajustes"] .i');
