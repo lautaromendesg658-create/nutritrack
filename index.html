@@ -270,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=63; // mantener a la par del número de caché en sw.js
+const APP_VER=64; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -783,21 +783,27 @@ function sortGrupos(gs,mode){
 // (interés + mora + cobrador). Incluye los renovados, cuyo saldo se cobró al renovar.
 function ganadoCompletados(){
   const fin=vLoans().filter(l=>l.status==='pagado'||l.status==='renovado');
-  let bruto=0, propio=0; const deOtros={}; const items=[];
+  let bruto=0;
+  // un grupo por persona: primero el que mira, después cada contraparte
+  const mio={key:'__yo__',nombre:esSocio()?'Mi parte':'Mi parte (dueño)',ini:'YO',monto:0,items:[]};
+  const otros={};
   fin.forEach(l=>{
-    const g=loanGananciaRealizada(l);
-    const r=loanReparto(l);
-    const mio=esSocio()?(r.socioParteReal||0):(r.miParteReal!=null?r.miParteReal:g);
-    bruto+=g; propio+=mio;
+    const g=loanGananciaRealizada(l), r=loanReparto(l);
+    bruto+=g;
+    const propio=esSocio()?(r.socioParteReal||0):(r.miParteReal!=null?r.miParteReal:g);
+    const pctPropio=r.compartido?(esSocio()?r.socioPct:r.miPct):100;
+    mio.monto+=propio; mio.items.push({l,parte:propio,pct:pctPropio});
     if(r.compartido){
       const k=esSocio()?'Dueño del negocio':r.socioNom;
-      const otro=esSocio()?(r.miParteReal||0):(r.socioParteReal||0);
-      deOtros[k]=(deOtros[k]||0)+otro;
+      const parte=esSocio()?(r.miParteReal||0):(r.socioParteReal||0);
+      const pct=esSocio()?r.miPct:r.socioPct;
+      if(!otros[k])otros[k]={key:'g:'+k,nombre:k,ini:ini(k),monto:0,items:[]};
+      otros[k].monto+=parte; otros[k].items.push({l,parte,pct});
     }
-    items.push({l,g,mio,pct:r.compartido?(esSocio()?r.socioPct:r.miPct):100});
   });
-  items.sort((a,b)=>b.g-a.g);
-  return {n:fin.length,bruto,propio,deOtros,items};
+  const grupos=[mio,...Object.values(otros).sort((a,b)=>b.monto-a.monto)];
+  grupos.forEach(g=>g.items.sort((a,b)=>b.parte-a.parte));
+  return {n:fin.length,bruto,grupos,compartido:Object.keys(otros).length>0};
 }
 // cuánto falta cobrar de los préstamos activos para recuperar el capital prestado (punto neutro)
 function faltaNeutro(){
@@ -809,31 +815,34 @@ function faltaNeutro(){
 function vGanado(){
   const G=ganadoCompletados(), N=faltaNeutro();
   if(!G.n&&!N.activos)return '';
-  const hayOtros=Object.keys(G.deOtros).length>0;
-  const abierto=repartoOpen.has('__ganado__');
   return `
-  <div class="list" style="padding:14px;margin-top:10px">
-    ${G.n?`<div class="t2" style="line-height:1.45">Dinero ganado con intereses, mora y cobrador hasta hoy de préstamos completados:</div>
-    <div style="font-size:26px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;margin-top:6px">${fmt$(G.bruto)}</div>
-    <div class="t2">${G.n} préstamo${G.n===1?'':'s'} terminado${G.n===1?'':'s'} (pagados y renovados). Es plata ya cobrada, no proyectada.</div>
-    ${hayOtros?`<div class="t2" style="margin-top:8px">De eso, <b style="color:var(--green)">${fmt$(G.propio)}</b> es tu parte · ${Object.entries(G.deOtros).map(([k,v])=>`${esc(k)}: <b>${fmt$(v)}</b>`).join(' · ')}</div>`:''}
-    <div class="t2" style="margin-top:8px"><span class="clip" data-rep="__ganado__">${abierto?'▾ ocultar el detalle':'▸ ver préstamo por préstamo'}</span></div>`:''}
-    ${N.activos?`${G.n?'<div style="height:1px;background:var(--line);margin:14px 0"></div>':''}
+  ${G.n?`<div class="list" style="padding:14px 14px 4px;margin-top:10px">
+    <div class="t2" style="line-height:1.45">Dinero ganado con intereses, mora y cobrador hasta hoy de préstamos completados:</div>
+    <div style="font-size:26px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;margin:6px 0 4px">${fmt$(G.bruto)}</div>
+  </div>
+  <div class="list" style="margin-bottom:10px">${G.grupos.map(g=>{
+    const open=repartoOpen.has('gan:'+g.key), color=g.key==='__yo__'?'var(--green)':'var(--blue)';
+    return `<div class="item rephdr" data-rep="gan:${esc(g.key)}" style="cursor:pointer">
+      <div class="ava ${g.key==='__yo__'?'':'shop'}">${esc(g.ini)}</div>
+      <div class="mid"><div class="t1">${esc(g.nombre)} <span class="chev">${open?'▾':'▸'}</span></div>
+        <div class="t2">${g.items.length} préstamo${g.items.length===1?'':'s'} terminado${g.items.length===1?'':'s'}</div></div>
+      <div class="end"><div class="m1" style="color:${color}">${fmt$(g.monto)}</div><div class="m2">ganado</div></div>
+    </div>${open?`<div class="repbox">${g.items.length?g.items.map(({l,parte,pct})=>{
+      const cl=client(l.clientId)||{nombre:'?'};
+      return `<div class="repsub" data-loan="${l.id}">
+        <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
+          <div class="t2">${l.status==='renovado'?'renovado':'pagado'} · prestado ${fmt$(l.monto)} · cobrado ${fmt$(loanTotalCobrado(l))}${pct<100?` · ${pct}%`:''}</div></div>
+        <div class="end"><div class="m1" style="font-size:14px;color:${color}">${fmt$(parte)}</div></div>
+      </div>`;}).join(''):'<div class="repsub" style="cursor:default"><div class="t2">Sin préstamos terminados</div></div>'}</div>`:''}`;
+  }).join('')}</div>`:''}
+  <div class="list" style="padding:14px;${G.n?'':'margin-top:10px'}">
+    ${N.activos?`
     <div class="t2" style="line-height:1.45">Dinero que deben pagar clientes para estar neutros:</div>
     <div style="font-size:26px;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;margin-top:6px">${fmt$(N.falta)}</div>
     <div class="t2">${N.falta>0
       ?`Es lo que falta cobrar de ${N.nl} de tus ${N.activos} préstamo${N.activos===1?'':'s'} activo${N.activos===1?'':'s'} para recuperar el capital que pusiste. De ahí en adelante, todo lo que entre es ganancia.`
       :`Ya recuperaste el capital de los ${N.activos} préstamo${N.activos===1?'':'s'} activo${N.activos===1?'':'s'}: todo lo que cobres de acá en más es ganancia. 🎉`}</div>`:''}
-  </div>
-  ${abierto?`<div class="list">${G.items.map(({l,g,mio,pct})=>{
-    const cl=client(l.clientId)||{nombre:'?'};
-    return `<div class="item" data-loan="${l.id}">
-      <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
-      <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
-        <div class="t2">Prestaste ${fmt$(l.monto)} · cobraste ${fmt$(loanTotalCobrado(l))} · ${l.status==='renovado'?'renovado':'pagado'}</div>
-        ${pct<100?`<div class="t2">Tu parte (${pct}%): ${fmt$(mio)}</div>`:''}</div>
-      <div class="end"><div class="m1" style="color:var(--green)">${fmt$(g)}</div><div class="m2">ganado</div></div>
-    </div>`;}).join('')}</div>`:''}`;
+  </div>`;
 }
 function vPendientes(){ // contratos armados que todavía no se convirtieron en préstamo
   const ds=vDrafts().slice().sort((a,b)=>
