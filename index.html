@@ -270,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=64; // mantener a la par del número de caché en sw.js
+const APP_VER=65; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -279,7 +279,7 @@ const DEF_REC={
 const DEF_SETTINGS={
   nombreNegocio:'Mi Negocio', moneda:'$', alias:'PRESTAMOSPPP.1986',
   mora:{tipo:'pct', valor:10, porDia:false}, horaLimite:18,
-  cobrador:{monto:0, dias:3},
+  cobrador:{monto:0, dias:3, bordes:true}, // bordes: 1ª y última cuota llevan cobrador desde el 1er día de mora
   diasNoLaborables:[0,6], // días que no cuentan para la mora (0=dom … 6=sáb). Por defecto sáb y dom
   socios:[],
   recordatorios:{...DEF_REC},
@@ -396,9 +396,20 @@ function moraDe(c,asOf){ // mora pendiente de cobro
   let tot=m.porDia?base*d:base;
   return Math.max(0,Math.round(tot)-cMoraPagada(c));
 }
+// primera y última cuota de un préstamo de más de 3: llevan cobrador apenas entran en mora,
+// sin esperar los días de gracia. La marca se guarda en la cuota al crear o guardar el préstamo.
+function marcarBordes(l){
+  const cs=l&&l.cuotas||[], n=cs.length;
+  cs.forEach((c,i)=>{
+    if(n>3&&(i===0||i===n-1))c.borde=true; else if(c.borde)delete c.borde;
+  });
+  return l;
+}
 function cobradorDe(c,asOf){ // cargo de cobrador pendiente
   const d=diasAtraso(c,asOf);
-  if(d<= (S.settings.cobrador.dias||3))return 0;
+  if(d<=0)return 0;
+  const deUna=c.borde&&(S.settings.cobrador.bordes!==false);
+  if(!deUna&&d<=(S.settings.cobrador.dias||3))return 0;
   return Math.max(0,Math.round(Number(S.settings.cobrador.monto)||0)-cCobradorPagado(c));
 }
 // momento a usar para medir la mora de un cobro fechado: hoy → ahora; un día pasado → su mediodía,
@@ -475,7 +486,7 @@ function genCuotas(total,n,freq,inicio,skipSun){
 function touch(o){o.updatedAt=Date.now();return o;}
 function saveClient(c){touch(c);const i=S.clients.findIndex(x=>x.id===c.id);
   if(i<0)S.clients.push(c);else S.clients[i]=c; persist(); fbPush('client',c);}
-function saveLoan(l){refreshLoanStatus(l);touch(l);const i=S.loans.findIndex(x=>x.id===l.id);
+function saveLoan(l){marcarBordes(l);refreshLoanStatus(l);touch(l);const i=S.loans.findIndex(x=>x.id===l.id);
   if(i<0)S.loans.push(l);else S.loans[i]=l; persist(); fbPush('loan',l);}
 function saveDoc(d){touch(d);const i=S.docs.findIndex(x=>x.id===d.id);
   if(i<0)S.docs.push(d);else S.docs[i]=d; idbPut(d); persist(); fbPush('doc',d);}
@@ -597,6 +608,17 @@ function saldarPorRenovacion(v,cuando){
     n++; total+=r;
   });
   return {n,total};
+}
+// marca la 1ª y la última cuota en los préstamos ya cargados (los nuevos se marcan al guardarse)
+function migrarBordes(){
+  let n=0;
+  (S.loans||[]).forEach(l=>{
+    const antes=JSON.stringify((l.cuotas||[]).map(c=>!!c.borde));
+    marcarBordes(l);
+    if(JSON.stringify((l.cuotas||[]).map(c=>!!c.borde))!==antes){n++;touch(l);fbPush('loan',l);}
+  });
+  if(n)persist();
+  return n;
 }
 // arrastre para las renovaciones hechas antes de que existiera lo de arriba
 function migrarRenovaciones(){
@@ -1175,7 +1197,7 @@ function vPrestamo(id){
     const parcial=cPagadoBase(c)>0&&rest>0;
     const badge=(est==='pagada'?'<span class="badge b-ok">Pagada</span>'
       :esRenov?'<span class="badge b-com">Renovada</span>'
-      :est==='vencida'?`<span class="badge b-ven">${diasAtraso(c)}d mora</span>${cob>0?'<span class="badge b-cob">cobrador</span>':''}`
+      :est==='vencida'?`<span class="badge b-ven">${diasAtraso(c)}d mora</span>${cob>0?`<span class="badge b-cob">cobrador${c.borde&&S.settings.cobrador.bordes!==false?' de una':''}</span>`:''}`
       :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>')
       +(parcial&&!esRenov?'<span class="badge b-cob">parcial</span>':'');
     const pagosTxt=(c.pagos||[]).map(p=>fmt$((p.monto||0)+(p.mora||0)+(p.cobrador||0))+' el '+new Date(p.t).toLocaleDateString('es-AR',{day:'numeric',month:'short'})
@@ -1823,6 +1845,12 @@ function vAjustes(){
     <input id="set-cobmonto" type="number" inputmode="decimal" value="${st.cobrador.monto}">
     <label>Se aplica después de (días de mora)</label>
     <input id="set-cobdias" type="number" inputmode="numeric" value="${st.cobrador.dias}">
+    <label>Primera y última cuota</label>
+    <div class="seg" id="set-cobbordes">
+      <button data-v="1" class="${st.cobrador.bordes!==false?'on':''}">Cobrador de una</button>
+      <button data-v="0" class="${st.cobrador.bordes===false?'on':''}">Igual que el resto</button>
+    </div>
+    <div class="hint">Con "de una", la <b>primera</b> y la <b>última</b> cuota llevan el cargo de cobrador apenas entran en mora, sin esperar los ${st.cobrador.dias} días. Solo en préstamos de más de 3 cuotas.</div>
   </div>
   <h2>🔔 Recordatorios (mensajes)</h2>
   <div class="list" style="padding:4px 14px 16px">
@@ -2760,6 +2788,7 @@ function unlockApp(sesion){
 }
 let _migRenovAviso=false;
 function revisarRenovacionesViejas(){
+  if(migrarBordes())render();
   const r=migrarRenovaciones();
   if(!r.loans)return;
   render();
@@ -3093,6 +3122,8 @@ function bindView(){
     $$('#set-morapordia button').forEach(b=>b.onclick=()=>{porDia=b.dataset.v==='1';
       $$('#set-morapordia button').forEach(x=>x.classList.toggle('on',x===b));});
     $$('#set-dias button').forEach(b=>b.onclick=()=>b.classList.toggle('on'));
+    $$('#set-cobbordes button').forEach(b=>b.onclick=()=>
+      $$('#set-cobbordes button').forEach(x=>x.classList.toggle('on',x===b)));
     sv.onclick=()=>{
       S.settings.nombreNegocio=$('#set-nombre').value.trim()||'Mi Negocio';
       S.settings.moneda=$('#set-moneda').value.trim()||'$';
@@ -3100,7 +3131,8 @@ function bindView(){
       S.settings.mora={tipo:moratipo,valor:+$('#set-moraval').value||0,porDia};
       S.settings.diasNoLaborables=$$('#set-dias button.on').map(b=>+b.dataset.v);
       S.settings.horaLimite=+$('#set-hora').value;
-      S.settings.cobrador={monto:+$('#set-cobmonto').value||0,dias:+$('#set-cobdias').value||3};
+      S.settings.cobrador={monto:+$('#set-cobmonto').value||0,dias:+$('#set-cobdias').value||3,
+        bordes:($$('#set-cobbordes button.on')[0]||{dataset:{v:'1'}}).dataset.v==='1'};
       S.settings.recordatorios={
         hoy:$('#set-rec-hoy').value.trim()||DEF_REC.hoy,
         manana:$('#set-rec-manana').value.trim()||DEF_REC.manana,
