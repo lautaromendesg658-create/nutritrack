@@ -270,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=66; // mantener a la par del número de caché en sw.js
+const APP_VER=67; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -801,6 +801,72 @@ function sortGrupos(gs,mode){
   else a.sort((x,y)=>x.vieja<y.vieja?-1:x.vieja>y.vieja?1:0); // 'atraso': el más viejo primero
   return a;
 }
+/* ----- LIQUIDACIÓN AL SOCIO: préstamos terminados cuya parte hay que pasarle ----- */
+const loanTerminado=l=>l.status==='pagado'||l.status==='renovado';
+function parteDelSocio(l){const r=loanReparto(l);return r.compartido?(r.socioParteReal||0):0;}
+function liquidaciones(){ // {pendientes:[], pagados:[]} de préstamos terminados con socio
+  const pend=[],pag=[];
+  vLoans().forEach(l=>{
+    if(!loanTerminado(l)||!l.gestorId||!l.gestorPct)return;
+    const monto=l.socioPagado?(l.socioPagadoMonto??parteDelSocio(l)):parteDelSocio(l);
+    if(monto<=0&&!l.socioPagado)return;
+    const it={l,socioId:l.gestorId,nombre:socioNombre(l.gestorId)||l.gestorNombre||'Socio',monto};
+    (l.socioPagado?pag:pend).push(it);
+  });
+  pend.sort((a,b)=>b.monto-a.monto);
+  pag.sort((a,b)=>(b.l.socioPagado||0)-(a.l.socioPagado||0));
+  return {pendientes:pend,pagados:pag};
+}
+function marcarPagadoSocio(id,deshacer){
+  const l=loan(id); if(!l)return;
+  if(esSocio())return alert('Solo el dueño puede marcar el pago de la parte del socio.');
+  const cl=client(l.clientId)||{nombre:'?'}, nom=socioNombre(l.gestorId)||l.gestorNombre||'el socio';
+  if(deshacer){
+    if(!confirm(`¿Marcar como NO pagada la parte de ${nom} del préstamo de ${cl.nombre}?\n\nVuelve a la lista de pendientes.`))return;
+    delete l.socioPagado; delete l.socioPagadoMonto;
+  }else{
+    const m=parteDelSocio(l);
+    if(!confirm(`¿Confirmás que ya le pagaste a ${nom} sus ${fmt$(m)} del préstamo de ${cl.nombre}?\n\nQueda registrado con la fecha de hoy y ${nom} lo va a ver en su cuenta.`))return;
+    l.socioPagado=Date.now(); l.socioPagadoMonto=m;
+  }
+  saveLoan(l);render();
+}
+function vLiquidaciones(){
+  const {pendientes,pagados}=liquidaciones();
+  if(!pendientes.length&&!pagados.length)return '';
+  const total=pendientes.reduce((a,x)=>a+x.monto,0);
+  const porSocio={};
+  pendientes.forEach(x=>{porSocio[x.socioId]=porSocio[x.socioId]||{nombre:x.nombre,monto:0,items:[]};
+    porSocio[x.socioId].monto+=x.monto; porSocio[x.socioId].items.push(x);});
+  const abiertoPag=repartoOpen.has('__liqpag__');
+  const fila=(x,pagado)=>{
+    const cl=client(x.l.clientId)||{nombre:'?'};
+    return `<div class="item" style="cursor:default">
+      <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
+      <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
+        <div class="t2">${x.l.status==='renovado'?'Renovado':'Pagado'} · ${esc(x.nombre)} ${x.l.gestorPct}%${pagado?` · <span style="color:var(--green)">✅ pagado el ${dShort(ymd(new Date(x.l.socioPagado)))}</span>`:''}</div>
+        ${pagado&&!esSocio()?`<div class="t2"><span class="undo" data-liqundo="${x.l.id}">deshacer</span></div>`:''}</div>
+      <div class="end"><div class="m1" style="color:${pagado?'var(--green)':'var(--blue)'}">${fmt$(x.monto)}</div>
+        ${pagado?'<div class="m2">cobrado</div>':(esSocio()?'<div class="m2">te deben</div>'
+          :`<button class="btn mini" data-liqpagar="${x.l.id}" style="margin-top:6px;background:var(--green);color:#06210f;white-space:nowrap">✅ Ya le pagué</button>`)}</div>
+    </div>`;};
+  return `
+  ${pendientes.length?`
+  <h2>💸 ${esSocio()?'Te deben de préstamos terminados':'Pagar a socios'} <span class="cnt">${fmt$(total)}</span></h2>
+  <div class="hint" style="margin:-4px 0 10px">${esSocio()
+    ?'Tu parte de los préstamos que ya terminaron y el dueño todavía no te pasó. Cuando te pague, va a figurar acá abajo como cobrado.'
+    :'Préstamos terminados cuya parte todavía no le pasaste al socio. Tocá <b>Ya le pagué</b> cuando se la des: queda registrado y el socio lo ve en su cuenta.'}</div>
+  ${!esSocio()&&Object.keys(porSocio).length?`<div class="resume" style="margin-bottom:8px">${Object.values(porSocio).map(s=>`${esc(s.nombre)}: <b>${fmt$(s.monto)}</b>`).join(' · ')}</div>`:''}
+  <div class="list">${pendientes.map(x=>fila(x,false)).join('')}</div>`:''}
+  ${pagados.length?`
+  <h2>✅ ${esSocio()?'Ya te pagaron':'Ya liquidado a socios'} <span class="cnt">${pagados.length}</span></h2>
+  <div class="list"><div class="item rephdr" data-rep="__liqpag__" style="cursor:pointer">
+    <div class="ava">✅</div>
+    <div class="mid"><div class="t1">${fmt$(pagados.reduce((a,x)=>a+x.monto,0))} <span class="chev">${abiertoPag?'▾':'▸'}</span></div>
+      <div class="t2">${pagados.length} préstamo${pagados.length===1?'':'s'} ya ${esSocio()?'cobrado':'liquidado'}${pagados.length===1?'':'s'}</div></div>
+  </div></div>
+  ${abiertoPag?`<div class="list">${pagados.map(x=>fila(x,true)).join('')}</div>`:''}`:''}`;
+}
 // ganancia ya embolsada de los préstamos terminados: lo cobrado por encima del capital de cada uno
 // (interés + mora + cobrador). Incluye los renovados, cuyo saldo se cobró al renovar.
 function ganadoCompletados(){
@@ -985,6 +1051,7 @@ function vInicio(){
     <button class="btn sec" id="sim-btn" style="flex:1">🧮 Simulador</button>
     <button class="btn sec" id="cn-btn" style="flex:1">📄 Nuevo contrato</button>
   </div>
+  ${vLiquidaciones()}
   ${vGanado()}
   ${vPendientes()}
   ${repartoHTML}
@@ -1186,7 +1253,13 @@ function vPrestamo(id){
         <div class="mid"><div class="t1" style="font-size:14px">${esc(r.socioNom)} (${r.socioPct}%)</div>
         <div class="t2">cobrado hasta ahora: ${fmt$(r.socioParteReal)}</div></div>
         <div class="end"><div class="m1" style="color:var(--blue)">${fmt$(r.socioParteTotal)}</div></div></div>
-      <button class="btn sec mini" data-reparto="${id}" style="margin-top:4px">✏️ Editar reparto</button>
+      ${loanTerminado(l)?(l.socioPagado
+        ?`<div class="resume" style="color:var(--green);margin-top:4px">✅ Le pagaste a ${esc(r.socioNom)} sus ${fmt$(l.socioPagadoMonto??r.socioParteReal)} el ${dLong(ymd(new Date(l.socioPagado)))}${esSocio()?'':` · <span class="undo" data-liqundo="${id}">deshacer</span>`}</div>`
+        :(r.socioParteReal>0?(esSocio()
+          ?`<div class="resume" style="color:var(--blue);margin-top:4px">⏳ El dueño todavía no te pasó tus ${fmt$(r.socioParteReal)} de este préstamo.</div>`
+          :`<div class="resume" style="margin-top:4px">Préstamo terminado: le corresponden <b>${fmt$(r.socioParteReal)}</b> a ${esc(r.socioNom)}.
+             <button class="btn mini" data-liqpagar="${id}" style="margin-top:8px;background:var(--green);color:#06210f">✅ Ya le pagué</button></div>`):'')):''}
+      ${esSocio()?'':`<button class="btn sec mini" data-reparto="${id}" style="margin-top:4px">✏️ Editar reparto</button>`}
     </div>`;})()}
   <h2>🗓 Cuotas</h2>
   <div class="list">${l.cuotas.map(c=>{
@@ -3051,6 +3124,8 @@ function bindView(){
       :deuda>0?`Te recordamos tu saldo pendiente de ${fmt$(deuda)}. ¡Gracias!`:`¡Gracias por estar al día! 🙌`;
     window.open('https://wa.me/'+b.dataset.wa+'?text='+encodeURIComponent(msg),'_blank');});
   $$('[data-restaurar]').forEach(b=>b.onclick=()=>restaurarDeLaPapelera(b.dataset.restaurar));
+  $$('[data-liqpagar]').forEach(b=>b.onclick=e=>{e.stopPropagation();marcarPagadoSocio(b.dataset.liqpagar);});
+  $$('[data-liqundo]').forEach(b=>b.onclick=e=>{e.stopPropagation();marcarPagadoSocio(b.dataset.liqundo,true);});
   $$('[data-purgar]').forEach(b=>b.onclick=()=>borrarDefinitivo(b.dataset.purgar));
   $$('[data-vercontrato]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.vercontrato);if(d)generarContrato(d);});
   $$('[data-tyc-draft]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.tycDraft);if(d)enviarTyC(d);});
