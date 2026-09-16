@@ -270,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=68; // mantener a la par del número de caché en sw.js
+const APP_VER=69; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1463,7 +1463,16 @@ function loadPdfLib(){
   });
   return window.__pdfLibPromise;
 }
+// El contrato tiene que entrar en UNA hoja: si no entra, se rearma más compacto hasta lograrlo.
 function buildContratoPDF(l,tipo){
+  const escalas=[1,.95,.9,.85,.8,.76,.72,.68,.64];
+  for(let i=0;i<escalas.length;i++){
+    const doc=armarContratoPDF(l,tipo,escalas[i]);
+    if(doc.getNumberOfPages()===1||i===escalas.length-1)return doc;
+  }
+}
+function armarContratoPDF(l,tipo,k){
+  k=k||1;
   const cl=client(l.clientId)||{}, esCom=tipo==='comercial';
   const m=S.settings.mora||{tipo:'pct',valor:5,porDia:false};
   const cob=S.settings.cobrador||{dias:3,monto:15000};
@@ -1472,27 +1481,29 @@ function buildContratoPDF(l,tipo){
   const moraTxt=(m.tipo==='pct'?fmt$(Math.round(l.cuotas[0].monto*(Number(m.valor)||0)/100)):fmt$(Number(m.valor)||0))+(m.porDia?' por cada día de atraso':'');
   const fHoy=new Date().toLocaleDateString('es-AR',{day:'numeric',month:'long',year:'numeric'});
   const doc=new window.jspdf.jsPDF({unit:'pt',format:'a4'});
-  const W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), M=42;
+  const W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight();
+  const M=Math.round(42*Math.max(.8,k)); // márgenes: se achican menos que el texto
+  const HDR=Math.round(92*k), PIE=Math.round(34*k);
   let y=0;
-  const ensure=need=>{if(y+need>H-46){doc.addPage();y=50;}};
-  const para=(txt,size,col,font,lh,gap)=>{doc.setFont('helvetica',font||'normal');doc.setFontSize(size);doc.setTextColor(col[0],col[1],col[2]);
-    doc.splitTextToSize(txt,W-2*M).forEach(ln=>{ensure(lh);doc.text(ln,M,y);y+=lh;});if(gap)y+=gap;};
-  const bullet=txt=>{doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor(55,65,81);
-    const lines=doc.splitTextToSize(txt,W-2*M-14);lines.forEach((ln,i)=>{ensure(12.5);if(i===0){doc.setFont('helvetica','bold');doc.text('•',M,y);doc.setFont('helvetica','normal');}doc.text(ln,M+14,y);y+=12.5;});y+=4;};
-  const heading=t=>{ensure(28);doc.setFont('helvetica','bold');doc.setFontSize(11.5);doc.setTextColor(19,71,107);doc.text(t,M,y);
-    doc.setDrawColor(209,213,219);doc.line(M,y+5,W-M,y+5);y+=20;};
+  const ensure=need=>{if(y+need>H-PIE-12){doc.addPage();y=50;}};
+  const para=(txt,size,col,font,lh,gap)=>{doc.setFont('helvetica',font||'normal');doc.setFontSize(size*k);doc.setTextColor(col[0],col[1],col[2]);
+    doc.splitTextToSize(txt,W-2*M).forEach(ln=>{ensure(lh*k);doc.text(ln,M,y);y+=lh*k;});if(gap)y+=gap*k;};
+  const bullet=txt=>{doc.setFont('helvetica','normal');doc.setFontSize(9.5*k);doc.setTextColor(55,65,81);
+    const lines=doc.splitTextToSize(txt,W-2*M-14);lines.forEach((ln,i)=>{ensure(12.5*k);if(i===0){doc.setFont('helvetica','bold');doc.text('•',M,y);doc.setFont('helvetica','normal');}doc.text(ln,M+14,y);y+=12.5*k;});y+=4*k;};
+  const heading=t=>{ensure(28*k);doc.setFont('helvetica','bold');doc.setFontSize(11.5*k);doc.setTextColor(19,71,107);doc.text(t,M,y);
+    doc.setDrawColor(209,213,219);doc.line(M,y+5*k,W-M,y+5*k);y+=20*k;};
   // encabezado
-  doc.setFillColor(13,46,71);doc.rect(0,0,W,92,'F');
-  doc.setFillColor(31,157,122);doc.rect(0,92,W,5,'F');
-  doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(23);doc.text('PRESTAMOS PPP',M,44);
-  doc.setTextColor(31,157,122);doc.setFontSize(10);doc.text('COMERCIALES Y PERSONALES',M,61);
-  doc.setTextColor(200,210,225);doc.setFont('helvetica','italic');doc.setFontSize(8.5);doc.text('Agilidad y Confianza  ·  Zona Sur',M,75);
-  doc.setTextColor(61,90,117);doc.setFont('helvetica','bold');doc.setFontSize(30);doc.text('$   $   $',W-M,58,{align:'right'});
-  y=132;
+  doc.setFillColor(13,46,71);doc.rect(0,0,W,HDR,'F');
+  doc.setFillColor(31,157,122);doc.rect(0,HDR,W,5*k,'F');
+  doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(23*k);doc.text('PRESTAMOS PPP',M,44*k);
+  doc.setTextColor(31,157,122);doc.setFontSize(10*k);doc.text('COMERCIALES Y PERSONALES',M,61*k);
+  doc.setTextColor(200,210,225);doc.setFont('helvetica','italic');doc.setFontSize(8.5*k);doc.text('Agilidad y Confianza  ·  Zona Sur',M,75*k);
+  doc.setTextColor(61,90,117);doc.setFont('helvetica','bold');doc.setFontSize(30*k);doc.text('$   $   $',W-M,58*k,{align:'right'});
+  y=HDR+40*k;
   // título
-  doc.setTextColor(19,71,107);doc.setFont('helvetica','bold');doc.setFontSize(16);
+  doc.setTextColor(19,71,107);doc.setFont('helvetica','bold');doc.setFontSize(16*k);
   doc.text(esCom?'CONTRATO DE PRÉSTAMO COMERCIAL':'CONTRATO DE PRÉSTAMO PERSONAL',W/2,y,{align:'center'});
-  doc.setFillColor(31,157,122);doc.rect(W/2-30,y+8,60,3,'F');y+=34;
+  doc.setFillColor(31,157,122);doc.rect(W/2-30,y+8*k,60,3*k,'F');y+=34*k;
   // intro
   const intro=esCom
     ?`Entre PRESTAMOS PPP, en adelante "El Prestamista", y el comercio/empresa ${(cl.nombre||'').toUpperCase()}${cl.direccion?', con domicilio comercial en '+cl.direccion:''}, en adelante "El Prestatario", se celebra el presente contrato de préstamo comercial destinado a capital de trabajo y/o la actividad comercial del Prestatario, sujeto a las siguientes cláusulas:`
@@ -1513,10 +1524,10 @@ function buildContratoPDF(l,tipo){
     ['Modalidad:',FREQ[l.frecuencia]],
     ['Mora por Cuota:',moraTxt]
   ];
-  rows.forEach((r,i)=>{ensure(18);if(i%2===0){doc.setFillColor(241,245,249);doc.rect(M,y-11,W-2*M,18,'F');}
-    doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(13,46,71);doc.text(r[0],M+6,y);
-    doc.setFont('helvetica','normal');doc.setTextColor(40,40,40);doc.text(String(r[1]),M+(W-2*M)*0.42,y);y+=18;});
-  y+=14;
+  rows.forEach((r,i)=>{ensure(18*k);if(i%2===0){doc.setFillColor(241,245,249);doc.rect(M,y-11*k,W-2*M,18*k,'F');}
+    doc.setFont('helvetica','bold');doc.setFontSize(9.5*k);doc.setTextColor(13,46,71);doc.text(r[0],M+6,y);
+    doc.setFont('helvetica','normal');doc.setTextColor(40,40,40);doc.text(String(r[1]),M+(W-2*M)*0.42,y);y+=18*k;});
+  y+=14*k;
   // cláusulas
   heading('CLÁUSULAS');
   const cls=['El Prestatario se compromete a pagar el préstamo en las cuotas y plazos según el cronograma establecido.'];
@@ -1528,26 +1539,26 @@ function buildContratoPDF(l,tipo){
   cls.push('El Prestamista podrá tomar las acciones legales correspondientes en caso de incumplimiento reiterado.');
   cls.push('Este contrato tiene validez legal y podrá ser presentado como soporte en las instancias que correspondan.');
   cls.forEach(bullet);
-  y+=6;
+  y+=6*k;
   para(`Ambas partes declaran haber leído y comprendido el presente contrato, aceptando voluntariamente todas sus condiciones. Firmado en Zona Sur, Buenos Aires, el día ${fHoy}.`,9.5,[55,65,81],'normal',13,10);
-  // firmas
-  ensure(56);y+=16;
+  // firmas: nunca se separan del contrato
+  ensure(56*k);y+=16*k;
   const colW=(W-2*M-30)/2, sy=y;
   doc.setDrawColor(150,150,150);
   doc.line(M,sy,M+colW,sy);doc.line(W-M-colW,sy,W-M,sy);
-  doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(13,46,71);
-  doc.text(esCom?'El Prestatario (Comercio)':'El Prestatario',M,sy+14);
-  doc.text('El Prestamista',W-M-colW,sy+14);
-  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(110,110,110);
-  doc.text((cl.nombre||'').toUpperCase()+(cl.dni?(esCom?'  ·  CUIT ':'  ·  DNI ')+cl.dni:''),M,sy+26);
-  doc.text('PRESTAMOS PPP',W-M-colW,sy+26);
+  doc.setFont('helvetica','bold');doc.setFontSize(10*k);doc.setTextColor(13,46,71);
+  doc.text(esCom?'El Prestatario (Comercio)':'El Prestatario',M,sy+14*k);
+  doc.text('El Prestamista',W-M-colW,sy+14*k);
+  doc.setFont('helvetica','normal');doc.setFontSize(9*k);doc.setTextColor(110,110,110);
+  doc.text((cl.nombre||'').toUpperCase()+(cl.dni?(esCom?'  ·  CUIT ':'  ·  DNI ')+cl.dni:''),M,sy+26*k);
+  doc.text('PRESTAMOS PPP',W-M-colW,sy+26*k);
   // pie en todas las páginas
   const np=doc.getNumberOfPages();
   for(let p=1;p<=np;p++){doc.setPage(p);
-    doc.setFillColor(31,157,122);doc.rect(0,H-38,W,4,'F');
-    doc.setFillColor(13,46,71);doc.rect(0,H-34,W,34,'F');
-    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8);
-    doc.text('PRESTAMOS PPP  ·  Comerciales y Personales  ·  Agilidad y Confianza  ·  Zona Sur',W/2,H-14,{align:'center'});}
+    doc.setFillColor(31,157,122);doc.rect(0,H-PIE-4,W,4,'F');
+    doc.setFillColor(13,46,71);doc.rect(0,H-PIE,W,PIE,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8*k);
+    doc.text('PRESTAMOS PPP  ·  Comerciales y Personales  ·  Agilidad y Confianza  ·  Zona Sur',W/2,H-PIE/2.6,{align:'center'});}
   return doc;
 }
 // cláusula de la 1ª y la última cuota, solo si la regla está activa y el préstamo la alcanza
@@ -1655,7 +1666,23 @@ function armarContrato(id,tipo){
     .printbar{display:none}
     html,body{background:#fff}
     .hoja{max-width:100%;margin:0}
-    .cuerpo{padding:30px 44px}
+    /* todo tiene que entrar en una hoja: el bloque se compacta y la firma nunca se parte */
+    .cuerpo{padding:20px 40px}
+    .head{padding:22px 40px 18px}
+    .head h1{font-size:25px}
+    .head .pesos{font-size:30px;letter-spacing:7px}
+    h2{font-size:18px}
+    .sub{margin:6px auto 14px}
+    p.intro{font-size:12px;line-height:1.45;margin-bottom:14px}
+    h3{font-size:13px;padding-bottom:4px;margin-bottom:8px}
+    td{padding:4px 10px;font-size:11.5px}
+    table{margin-bottom:14px}
+    li{font-size:11.5px;line-height:1.4;margin-bottom:4px}
+    ul{margin-bottom:12px}
+    p.cierre{font-size:11.5px;line-height:1.45;margin-bottom:28px}
+    .firmas{margin-bottom:22px;page-break-inside:avoid;break-inside:avoid}
+    .firma{page-break-inside:avoid;break-inside:avoid}
+    .pie{padding:9px;font-size:9.5px}
   }
   /* vista en pantallas angostas (la impresión/PDF conserva el diseño completo) */
   @media screen and (max-width:600px){
@@ -1713,6 +1740,25 @@ function armarContrato(id,tipo){
   <div class="pie">PRESTAMOS PPP · Comerciales y Personales · Agilidad y Confianza · Zona Sur</div>
 </div>
 <div class="printbar"><button onclick="window.print()">🖨 Imprimir / Guardar PDF</button></div>
+<script>
+// si el contrato no entra en una hoja A4, se compacta hasta que entre (la firma no se separa)
+(function(){
+  var A4=1122; // alto util de una A4 a 96dpi
+  function ajustar(){
+    var h=document.querySelector('.hoja');
+    if(!h)return;
+    h.style.zoom='';
+    var alto=h.getBoundingClientRect().height;
+    if(alto<=A4)return;
+    var f=Math.max(.6,Math.floor((A4/alto)*100)/100);
+    h.style.zoom=f;
+  }
+  if(document.readyState==='complete')ajustar();
+  else window.addEventListener('load',ajustar);
+  setTimeout(ajustar,400);
+  window.addEventListener('beforeprint',ajustar);
+})();
+<\/script>
 </body></html>`;
   const tel=(cl.telefono||'').replace(/\D/g,'');
   loadPdfLib().catch(()=>{}); // precargar para que el envío sea instantáneo
