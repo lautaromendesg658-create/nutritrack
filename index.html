@@ -270,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=69; // mantener a la par del número de caché en sw.js
+const APP_VER=70; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1481,6 +1481,9 @@ function armarContratoPDF(l,tipo,k){
   const moraTxt=(m.tipo==='pct'?fmt$(Math.round(l.cuotas[0].monto*(Number(m.valor)||0)/100)):fmt$(Number(m.valor)||0))+(m.porDia?' por cada día de atraso':'');
   const fHoy=new Date().toLocaleDateString('es-AR',{day:'numeric',month:'long',year:'numeric'});
   const doc=new window.jspdf.jsPDF({unit:'pt',format:'a4'});
+  // los lectores (y WhatsApp) muestran estos datos, no el nombre del archivo
+  try{const t=nombreContrato(l);
+    doc.setProperties({title:t,subject:t,author:'PRESTAMOS PPP',creator:'PRESTAMOS PPP',keywords:''});}catch(e){}
   const W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight();
   const M=Math.round(42*Math.max(.8,k)); // márgenes: se achican menos que el texto
   const HDR=Math.round(92*k), PIE=Math.round(34*k);
@@ -1574,10 +1577,16 @@ function textoBordes(l){
     +`${cob.dias||3} día${(cob.dias||3)==1?'':'s'} allí previstos, y se suma a la cuota y a la mora que correspondan.`;
 }
 function pdfLista(){return !!(window.jspdf&&window.jspdf.jsPDF);}
-function armarPdfFile(l,tipo){ // sincrónico: requiere que jsPDF ya esté cargada
+// así se llama el archivo y así lo titula WhatsApp al reenviarlo
+function nombreContrato(l){
   const cl=client(l.clientId)||{};
+  const nom=(cl.nombre||'Cliente').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
+  return 'Contrato Préstamo - '+nom;
+}
+function armarPdfFile(l,tipo){ // sincrónico: requiere que jsPDF ya esté cargada
+  const titulo=nombreContrato(l);
   const blob=buildContratoPDF(l,tipo).output('blob');
-  const fname='Contrato_'+(cl.nombre||'cliente').replace(/[^\w]+/g,'_')+'.pdf';
+  const fname=titulo+'.pdf';
   return {blob,fname,file:new File([blob],fname,{type:'application/pdf'})};
 }
 function descargarPdf(blob,fname){
@@ -1630,7 +1639,7 @@ function armarContrato(id,tipo){
   const firmaLbl=esCom?'El Prestatario (Comercio)':'El Prestatario';
   const clausulaBordes=textoBordes(l);
   const html=`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>Contrato ${esCom?'comercial':'personal'} - ${esc(cl.nombre||'')}</title>
+<title>${esc(nombreContrato(l))}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',Arial,sans-serif}
   body{background:#fff;color:#1f2937}
