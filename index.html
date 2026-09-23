@@ -58,7 +58,9 @@
     display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:var(--gold);flex-shrink:0}
   .ava.shop{color:var(--blue)}
   .item .mid{flex:1;min-width:0}
-  .item .t1{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* el nombre puede ocupar dos líneas: si se cortara, las etiquetas que van al lado
+     (estado del préstamo, tipo de cliente, ✓ avisado) quedarían escondidas */
+  .item .t1{font-weight:700;font-size:15px;overflow-wrap:anywhere}
   .item .t2{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* filas de acciones: se acomodan en varias líneas en vez de cortarse con "…" */
   .item .t2.acts{white-space:normal;overflow:visible;text-overflow:clip;line-height:2}
@@ -270,7 +272,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=71; // mantener a la par del número de caché en sw.js
+const APP_VER=72; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1466,9 +1468,10 @@ function formRecordatorios(){
     const extra=moraDe(c)+cobradorDe(c);
     return `<div class="item" style="cursor:default">
       <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
-      <div class="mid"><div class="t1">${esc(cl.nombre)} ${ya?`<span class="badge b-ok" data-desavisar="${key}" style="cursor:pointer" title="sacar la marca">✓ avisado</span>`:''}</div>
+      <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
         <div class="t2">Cuota ${c.n}/${l.cuotas.length} · <b>${fmt$(total)}</b>${recFilter==='vencido'?' · vencía '+dShort(c.vence):''}</div>
         ${extra>0?`<div class="t2" style="color:var(--orange)">incluye ${fmt$(extra)} de mora${cobradorDe(c)>0?' y cobrador':''}</div>`:''}
+        ${ya?`<div class="t2 acts"><span class="badge b-ok" data-desavisar="${key}" style="cursor:pointer" title="tocá para sacar la marca">✓ avisado hoy</span></div>`:''}
         ${tel?'':'<div class="t2">sin teléfono cargado</div>'}</div>
       <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
         ${tel?`<button class="btn ${ya?'sec':'green'} mini" data-avisar="${key}" style="white-space:nowrap">${ya?'Reenviar':'Avisar'}</button>`:''}
