@@ -270,7 +270,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=70; // mantener a la par del número de caché en sw.js
+const APP_VER=71; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -284,6 +284,7 @@ const DEF_SETTINGS={
   socios:[],
   recordatorios:{...DEF_REC},
   purgados:[], // ids borrados definitivamente: viajan para que desaparezcan en todos los dispositivos
+  avisados:{date:'',keys:[]}, // recordatorios ya enviados hoy, compartidos entre dispositivos
   updatedAt:0
 };
 // completa cualquier campo faltante en los ajustes (p. ej. si vienen de una versión vieja o de la nube)
@@ -294,6 +295,7 @@ function normSettings(st){st=st||{};
     diasNoLaborables:Array.isArray(st.diasNoLaborables)?st.diasNoLaborables:[0,6],
     socios:st.socios||[],
     purgados:Array.isArray(st.purgados)?st.purgados:[],
+    avisados:(st.avisados&&Array.isArray(st.avisados.keys))?st.avisados:{date:'',keys:[]},
     recordatorios:{...DEF_REC,...(st.recordatorios||{})}};
 }
 let S={settings:{...DEF_SETTINGS}, clients:[], loans:[], docs:[], drafts:[], trash:[]};
@@ -687,7 +689,14 @@ function fbConnect(){
       FB.unsubs.push(FB.base.collection('meta').doc('settings').onSnapshot(doc=>{
         const d=doc.data(); if(!d||!d.json)return;
         let st;try{st=JSON.parse(d.json);}catch(e){return;}
-        if((st.updatedAt||0)>(S.settings.updatedAt||0)){S.settings=normSettings(st);
+        if((st.updatedAt||0)>(S.settings.updatedAt||0)){
+          const avPrev=S.settings.avisados; // los avisos del día no se pisan: se unen
+          S.settings=normSettings(st);
+          const hoy=todayStr();
+          if(avPrev&&avPrev.date===hoy&&(avPrev.keys||[]).length){
+            const inc=(S.settings.avisados&&S.settings.avisados.date===hoy)?(S.settings.avisados.keys||[]):[];
+            S.settings.avisados={date:hoy,keys:[...new Set([...inc,...avPrev.keys])]};
+          }
           podarPurgados(); // si en otro dispositivo borraron algo definitivamente, acá también desaparece
           persist();applyBiz();render();}
       }));
@@ -1408,17 +1417,45 @@ function recMsg(tipo,l,c){
   let out=tpl; Object.entries(map).forEach(([k,v])=>out=out.split(k).join(v));
   return out;
 }
-function avisadosSet(){try{const o=JSON.parse(localStorage.getItem(LS+'-avisados')||'null');
-  if(o&&o.date===todayStr())return new Set(o.keys);}catch(e){}return new Set();}
-function avisadosMark(key){const s=avisadosSet();s.add(key);
-  localStorage.setItem(LS+'-avisados',JSON.stringify({date:todayStr(),keys:[...s]}));}
+/* "✓ avisado": vive en los ajustes sincronizados, así vale en todos los dispositivos
+   y para vos y tus socios por igual. Se limpia solo al cambiar el día. */
+function avisadosHoy(){
+  const a=S.settings.avisados;
+  return (a&&a.date===todayStr())?a:{date:todayStr(),keys:[]};
+}
+function avisadosSet(){return new Set(avisadosHoy().keys||[]);}
+function avisadosMark(key){
+  const a=avisadosHoy();
+  if((a.keys||[]).includes(key))return false; // ya estaba marcado hoy
+  a.keys=(a.keys||[]).concat([key]);
+  S.settings.avisados=a;
+  saveSettings();
+  return true;
+}
+function avisadosUnmark(key){
+  const a=avisadosHoy();
+  a.keys=(a.keys||[]).filter(k=>k!==key);
+  S.settings.avisados=a; saveSettings();
+}
+// los avisos que habían quedado guardados solo en este dispositivo pasan a los ajustes
+function migrarAvisados(){
+  let o=null;
+  try{o=JSON.parse(localStorage.getItem(LS+'-avisados')||'null');}catch(e){}
+  localStorage.removeItem(LS+'-avisados');
+  if(!o||o.date!==todayStr()||!(o.keys||[]).length)return 0;
+  const a=avisadosHoy(), antes=(a.keys||[]).length;
+  a.keys=[...new Set([...(a.keys||[]),...o.keys])];
+  if(a.keys.length===antes)return 0;
+  S.settings.avisados=a; saveSettings();
+  return a.keys.length-antes;
+}
 let recFilter='hoy';
 function formRecordatorios(){
   const tipos=[['hoy','Vencen hoy'],['manana','Vencen mañana'],['vencido','Vencidos']];
   const lista=recLista(recFilter), avis=avisadosSet();
   const totalLista=lista.reduce((a,{c})=>a+cRestante(c)+moraDe(c)+cobradorDe(c),0);
   modal(`<h3>🔔 Recordatorios</h3>
-  <div class="hint">"Avisar" abre WhatsApp con el mensaje listo. "Cobrar" registra el pago sin salir de acá: cuando lo guardás, volvés a esta lista y el cliente ya no aparece. Los mensajes se editan en Ajustes › Recordatorios.</div>
+  <div class="hint">"Avisar" abre WhatsApp con el mensaje listo y deja el cliente marcado <b>✓ avisado</b> por el resto del día, en todos los dispositivos y también para tus socios. Tocá la marca si querés sacarla. Los mensajes se editan en Ajustes › Recordatorios.</div>
   <div class="chips" style="margin-top:12px">
     ${tipos.map(([k,t])=>`<button class="${recFilter===k?'on':''}" data-rf="${k}">${t} (${recLista(k).length})</button>`).join('')}
   </div>
@@ -1429,12 +1466,12 @@ function formRecordatorios(){
     const extra=moraDe(c)+cobradorDe(c);
     return `<div class="item" style="cursor:default">
       <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
-      <div class="mid"><div class="t1">${esc(cl.nombre)} ${ya?'<span class="badge b-ok">✓ avisado</span>':''}</div>
+      <div class="mid"><div class="t1">${esc(cl.nombre)} ${ya?`<span class="badge b-ok" data-desavisar="${key}" style="cursor:pointer" title="sacar la marca">✓ avisado</span>`:''}</div>
         <div class="t2">Cuota ${c.n}/${l.cuotas.length} · <b>${fmt$(total)}</b>${recFilter==='vencido'?' · vencía '+dShort(c.vence):''}</div>
         ${extra>0?`<div class="t2" style="color:var(--orange)">incluye ${fmt$(extra)} de mora${cobradorDe(c)>0?' y cobrador':''}</div>`:''}
         ${tel?'':'<div class="t2">sin teléfono cargado</div>'}</div>
       <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
-        ${tel?`<button class="btn green mini" data-avisar="${key}">Avisar</button>`:''}
+        ${tel?`<button class="btn ${ya?'sec':'green'} mini" data-avisar="${key}" style="white-space:nowrap">${ya?'Reenviar':'Avisar'}</button>`:''}
         <button class="btn mini" data-reccobrar="${key}" style="background:var(--gold);color:#14110a;white-space:nowrap">💵 Cobrar</button>
       </div>
     </div>`;}).join(''):'<div class="empty">No hay clientes en esta lista 🎉</div>'}</div>`);
@@ -1445,6 +1482,8 @@ function formRecordatorios(){
     waOpen(cl.telefono,recMsg(recFilter,l,c));
     avisadosMark(b.dataset.avisar); formRecordatorios();
   });
+  $$('[data-desavisar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
+    avisadosUnmark(b.dataset.desavisar); formRecordatorios();});
   // cobrar sin salir del panel: al terminar (o al cerrar) se vuelve a esta misma lista
   $$('[data-reccobrar]').forEach(b=>b.onclick=()=>{
     const[id,n]=b.dataset.reccobrar.split('|');
@@ -3025,6 +3064,7 @@ function unlockApp(sesion){
   UNLOCKED=true;sessionStorage.setItem('pc-unlocked','1');
   $('#lock').classList.remove('show');$('#lock').innerHTML='';
   aplicarRol(); applyBiz();render();fbConnect();
+  migrarAvisados();
   if(!esSocio())setTimeout(revisarRenovacionesViejas,1200); // y de nuevo cuando baje la nube
   if(!esSocio())setTimeout(revisarRenovacionesViejas,7000);
 }
