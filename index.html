@@ -16,6 +16,17 @@
     --bg:#0b0d12; --panel:#151821; --panel-2:#1c2030; --line:#2a3042;
     --gold:#f5c84c; --green:#3ddc84; --blue:#4d8dff; --red:#ff5d5d; --orange:#ff9f43;
     --txt:#f1f3f7; --muted:#8b93a7;
+    --acc:#f5c84c; --accTxt:#14110a;      /* botón principal */
+    --onColor:#0b0d12;                    /* texto sobre botones de color vivo */
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+  }
+  /* tema claro: mismo diseño, papel en vez de pizarra */
+  body.claro{
+    --bg:#f3f0ea; --panel:#fbfaf7; --panel-2:#eeeae1; --line:#dcd6c9;
+    --gold:#8a6a00; --green:#1d7a4c; --blue:#2a5fa6; --red:#b3392c; --orange:#a85f18;
+    --txt:#1b1a17; --muted:#857f72;
+    --acc:#1f2a37; --accTxt:#ffffff;
+    --onColor:#ffffff;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
   html,body{background:var(--bg);color:var(--txt);
@@ -24,33 +35,35 @@
   .wrap{padding:16px 16px 120px;max-width:980px;margin:0 auto}
   @media(min-width:700px){.wrap{padding-top:24px}}
 
-  header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;gap:10px}
-  h1{font-size:26px;font-weight:800;color:var(--gold);letter-spacing:-.5px;line-height:1.1}
+  header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:10px}
+  h1{font-family:var(--serif);font-size:27px;font-weight:600;color:var(--txt);letter-spacing:-.2px;line-height:1.15}
+  @media(min-width:700px){h1{font-size:32px}}
   .sub{font-size:11px;letter-spacing:2.5px;color:var(--muted);text-transform:uppercase;margin-top:3px}
-  .clockbox{text-align:right;flex-shrink:0}
-  .clock{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--txt)}
-  .clock small{font-size:14px;color:var(--gold)}
-  .cdate{font-size:11px;color:var(--muted);text-transform:capitalize;margin-top:2px}
-  .syncdot{display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--muted);margin-right:5px;vertical-align:1px}
-  .syncdot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .cdate{font-size:12px;color:var(--muted);text-transform:capitalize;margin-top:4px}
+  .hdracc{display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0}
+  .clock{font-variant-numeric:tabular-nums}
+  .syncdot{display:inline-block;width:7px;height:7px;border-radius:99px;background:var(--muted);margin-right:5px;vertical-align:1px}
+  .syncdot.on{background:var(--green)}
   .syncdot.err{background:var(--red)}
-  .syncline{font-size:10px;color:var(--muted);margin-top:3px}
+  .syncline{font-size:11px;color:var(--muted);margin-top:5px}
 
   /* tarjetas dashboard */
-  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0}
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:0 18px;margin:16px 0 6px}
   @media(min-width:700px){.stats{grid-template-columns:repeat(4,1fr)}}
-  .stat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}
-  .stat .lbl{font-size:11px;letter-spacing:.8px;color:var(--muted);text-transform:uppercase;font-weight:600}
-  .stat .val{font-size:22px;font-weight:800;margin-top:7px;font-variant-numeric:tabular-nums}
+  .stat{background:transparent;border:0;border-top:2px solid var(--line);border-radius:0;padding:10px 0 14px}
+  .stat .lbl{font-size:10px;letter-spacing:1.1px;color:var(--muted);text-transform:uppercase;font-weight:600}
+  .stat .val{font-family:var(--serif);font-size:23px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;color:var(--txt)}
   .stat .ex{font-size:11px;color:var(--muted);margin-top:3px}
   .stat.gold .val{color:var(--gold)} .stat.green .val{color:var(--green)}
   .stat.blue .val{color:var(--blue)} .stat.red .val{color:var(--red)}
   .stat.orange .val{color:var(--orange)}
 
-  h2{font-size:16px;font-weight:800;margin:20px 0 10px;display:flex;align-items:center;gap:8px}
-  h2 .cnt{background:var(--panel-2);color:var(--muted);font-size:12px;padding:2px 9px;border-radius:99px;font-weight:700}
+  h2{font-family:var(--serif);font-size:19px;font-weight:600;margin:26px 0 10px;
+    display:flex;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h2 .cnt{background:var(--panel-2);color:var(--muted);font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700;
+    font-family:inherit;margin-left:auto;letter-spacing:.5px}
 
-  .list{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .list{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
   .item{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);cursor:pointer}
   .item:last-child{border-bottom:none}
   .item:active{background:var(--panel-2)}
@@ -76,8 +89,8 @@
   .item .m2{font-size:11px;color:var(--muted);margin-top:2px}
   .chev{font-size:11px;color:var(--muted);margin-left:2px}
   .clip{color:var(--blue);cursor:pointer;font-weight:600}
-  .undo{display:inline-block;color:var(--red);cursor:pointer;font-weight:800;padding:0 6px;
-    border:1px solid rgba(255,93,93,.35);border-radius:6px;line-height:1.5;margin-left:2px}
+  .undo{display:inline-block;color:var(--red);cursor:pointer;font-weight:700;padding:0 6px;
+    border:1px solid var(--red);border-radius:6px;line-height:1.5;margin-left:2px;opacity:.85}
   .balgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:12px}
   .balgrid .bn{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
   .balgrid .bl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.3px}
@@ -94,7 +107,7 @@
   .tira i.tarde,.tl.tarde{background:var(--gold)}
   .tira i.venc,.tl.venc{background:var(--orange)}
   .tira i.mala,.tl.mala{background:var(--red)}
-  .tira i.neu,.tl.neu{background:#3a4050}
+  .tira i.neu,.tl.neu{background:var(--line)}
   .repsub{display:flex;align-items:center;gap:12px;padding:11px 14px 11px 24px;border-top:1px solid var(--line);cursor:pointer}
   .repsub:active{background:var(--bg)}
   .repsub .mid{flex:1;min-width:0}
@@ -102,27 +115,30 @@
   .repsub .end{flex-shrink:0;text-align:right}
   .empty{padding:34px 20px;text-align:center;color:var(--muted);font-style:italic;font-size:14px;line-height:1.5}
 
-  .badge{display:inline-block;font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;
-    text-transform:uppercase;letter-spacing:.5px}
-  .b-per{background:rgba(245,200,76,.13);color:var(--gold)}
-  .b-com{background:rgba(77,141,255,.15);color:var(--blue)}
-  .b-ok{background:rgba(61,220,132,.13);color:var(--green)}
-  .b-hoy{background:rgba(245,200,76,.15);color:var(--gold)}
-  .b-ven{background:rgba(255,93,93,.15);color:var(--red)}
-  .b-fut{background:var(--panel-2);color:var(--muted)}
-  .b-cob{background:rgba(255,159,67,.15);color:var(--orange)}
+  .badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;
+    text-transform:uppercase;letter-spacing:.5px;border:1px solid currentColor;background:transparent}
+  .b-per{color:var(--gold)}
+  .b-com{color:var(--blue)}
+  .b-ok{color:var(--green)}
+  .b-hoy{color:var(--gold)}
+  .b-ven{color:var(--red)}
+  .b-fut{color:var(--muted)}
+  .b-cob{color:var(--orange)}
 
   button{font-family:inherit;cursor:pointer}
-  .btn{border:none;border-radius:13px;padding:13px 18px;font-weight:800;font-size:14px;
-    background:var(--gold);color:#14110a;width:100%;transition:.15s}
+  .btn{border:none;border-radius:10px;padding:13px 18px;font-weight:700;font-size:14px;
+    background:var(--acc);color:var(--accTxt);width:100%;transition:.15s;cursor:pointer}
   .btn:active{transform:scale(.98)}
   .btn.sec{background:var(--panel-2);color:var(--txt);border:1px solid var(--line)}
-  .btn.green{background:var(--green);color:#06160d}
-  .btn.red{background:rgba(255,93,93,.13);color:var(--red);border:1px solid rgba(255,93,93,.3)}
-  .btn.blue{background:var(--blue);color:#fff}
-  .btn.mini{width:auto;padding:8px 14px;font-size:12px;border-radius:10px}
+  .btn.green{background:var(--green);color:var(--onColor)}
+  .btn.oro{background:var(--gold);color:var(--onColor)}
+  .btn.red{background:transparent;color:var(--red);border:1px solid var(--red)}
+  .btn.blue{background:var(--blue);color:var(--onColor)}
+  .btn.mini{width:auto;padding:8px 13px;font-size:12px;border-radius:8px;white-space:nowrap}
   .btnrow{display:flex;gap:10px;margin-top:10px}
   .btnrow .btn{flex:1}
+  /* columna de acciones de una fila de cobranza */
+  .acciones{display:flex;flex-direction:column;gap:6px;flex-shrink:0;align-items:stretch}
 
   /* formularios */
   label{display:block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;
@@ -135,11 +151,11 @@
   .seg{display:flex;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px}
   .seg button{flex:1;background:none;border:none;color:var(--muted);padding:10px 4px;border-radius:9px;
     font-weight:700;font-size:13px}
-  .seg button.on{background:var(--gold);color:#14110a}
+  .seg button.on{background:var(--gold);color:var(--onColor)}
   .dias{display:flex;gap:5px;flex-wrap:wrap}
   .dias button{flex:1;min-width:40px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);
     padding:10px 2px;border-radius:10px;font-weight:700;font-size:12px}
-  .dias button.on{background:var(--gold);color:#14110a;border-color:var(--gold)}
+  .dias button.on{background:var(--gold);color:var(--onColor);border-color:var(--gold)}
   .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
   .resume{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
     margin-top:14px;font-size:14px;line-height:1.8}
@@ -152,7 +168,7 @@
   .sheet{background:var(--panel);border:1px solid var(--line);border-radius:22px 22px 0 0;width:100%;
     max-width:560px;max-height:92vh;overflow-y:auto;padding:20px 18px calc(24px + env(safe-area-inset-bottom))}
   @media(min-width:700px){.sheet{border-radius:22px}}
-  .sheet h3{font-size:18px;font-weight:800;margin-bottom:4px}
+  .sheet h3{font-family:var(--serif);font-size:20px;font-weight:600;margin-bottom:4px}
   .sheet .x{position:sticky;float:right;top:0;background:var(--panel-2);border:1px solid var(--line);
     color:var(--muted);width:34px;height:34px;border-radius:99px;font-size:16px;font-weight:700}
 
@@ -197,26 +213,26 @@
   .chips{display:flex;gap:8px;margin:12px 0;overflow-x:auto;padding-bottom:2px}
   .chips button{background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:8px 15px;
     border-radius:99px;font-weight:700;font-size:13px;white-space:nowrap}
-  .chips button.on{background:var(--gold);color:#14110a;border-color:var(--gold)}
+  .chips button.on{background:var(--acc);color:var(--accTxt);border-color:var(--acc)}
 
   .search{position:relative;margin:12px 0}
   .search input{padding-left:38px}
   .search:before{content:"🔍";position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;opacity:.6}
 
-  .back{background:none;border:none;color:var(--gold);font-weight:800;font-size:14px;padding:4px 0;margin-bottom:8px}
+  .back{background:none;border:none;color:var(--blue);font-weight:700;font-size:14px;padding:4px 0;margin-bottom:8px;cursor:pointer}
   .fab{position:fixed;right:18px;bottom:calc(78px + env(safe-area-inset-bottom));width:60px;height:60px;
-    border-radius:99px;background:var(--gold);color:#14110a;border:none;font-size:30px;font-weight:300;
-    box-shadow:0 8px 28px rgba(0,0,0,.55);z-index:30;display:none}
-  .progress{height:6px;background:#0d0f15;border-radius:99px;overflow:hidden;margin-top:8px}
+    border-radius:99px;background:var(--acc);color:var(--accTxt);border:none;font-size:30px;font-weight:300;
+    box-shadow:0 8px 28px rgba(0,0,0,.35);z-index:30;display:none}
+  .progress{height:6px;background:var(--panel-2);border-radius:99px;overflow:hidden;margin-top:8px}
   .progress i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .3s}
 
-  .tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:rgba(11,13,18,.88);
+  .tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--panel);
     backdrop-filter:blur(12px);border-top:1px solid var(--line);
     padding-bottom:env(safe-area-inset-bottom);z-index:25}
   .tabs button{flex:1;background:none;border:none;color:var(--muted);padding:11px 0 9px;
     font-size:10px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px}
   .tabs button .i{font-size:20px}
-  .tabs button.active{color:var(--gold)}
+  .tabs button.active{color:var(--acc)}
 
   details{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px}
   summary{font-weight:700;font-size:13px;cursor:pointer;color:var(--gold)}
@@ -252,14 +268,14 @@
 <body>
 <div class="wrap">
   <header>
-    <div>
-      <h1 id="bizname">PrestaControl</h1>
-      <div class="sub">Gestión de préstamos</div>
-    </div>
-    <div class="clockbox">
-      <div class="clock" id="clock">--:--<small>:--</small></div>
+    <div style="min-width:0">
+      <h1 id="saludo">Hola</h1>
       <div class="cdate" id="cdate"></div>
-      <div class="syncline"><span class="syncdot" id="syncdot"></span><span id="synctxt">Sin sincronizar</span></div>
+      <div class="syncline"><span class="syncdot" id="syncdot"></span><span id="synctxt">Sin sincronizar</span> · <span class="clock" id="clock">--:--</span> · <span id="bizname" style="display:none"></span></div>
+    </div>
+    <div class="hdracc">
+      <button class="btn mini" id="hd-nuevo">+ Préstamo</button>
+      <button class="btn sec mini" id="hd-tema" title="Cambiar entre claro y oscuro">🌙</button>
     </div>
   </header>
   <main id="view"></main>
@@ -281,7 +297,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=76; // mantener a la par del número de caché en sw.js
+const APP_VER=77; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -289,6 +305,7 @@ const DEF_REC={
 };
 const DEF_SETTINGS={
   nombreNegocio:'Mi Negocio', moneda:'$', alias:'PRESTAMOSPPP.1986',
+  nombreDueno:'Lautaro', // para el saludo del inicio
   mora:{tipo:'pct', valor:10, porDia:false}, horaLimite:18,
   cobrador:{monto:0, dias:3, bordes:true}, // bordes: 1ª y última cuota llevan cobrador desde el 1er día de mora
   diasNoLaborables:[0,6], // días que no cuentan para la mora (0=dom … 6=sáb). Por defecto sáb y dom
@@ -845,17 +862,30 @@ function formCopias(){
 /* ================= RELOJ ================= */
 function tickClock(){
   const n=new Date();
-  $('#clock').innerHTML=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')
-    +'<small>:'+String(n.getSeconds()).padStart(2,'0')+'</small>';
+  $('#clock').textContent=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
   $('#cdate').textContent=n.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
 }
 setInterval(tickClock,1000);tickClock();
+/* ----- tema claro / oscuro (preferencia de cada dispositivo) ----- */
+function temaActual(){return localStorage.getItem(LS+'-tema')||'claro';}
+function aplicarTema(t){
+  t=t||temaActual();
+  document.body.classList.toggle('claro',t==='claro');
+  const m=document.querySelector('meta[name="theme-color"]');
+  if(m)m.setAttribute('content',t==='claro'?'#f3f0ea':'#0b0d12');
+  const b=$('#hd-tema'); if(b)b.textContent=t==='claro'?'🌙':'☀️';
+  const s=$('#set-tema'); if(s)s.value=t;
+}
+function cambiarTema(t){localStorage.setItem(LS+'-tema',t);aplicarTema(t);}
+aplicarTema();
 setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
 
 /* ================= NAVEGACIÓN ================= */
 let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), vencSort='atraso';
 $$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
 $('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
+$('#hd-tema').onclick=()=>cambiarTema(temaActual()==='claro'?'oscuro':'claro');
+$('#hd-nuevo').onclick=()=>{if(vClients().length)formPrestamo();else{alert('Primero cargá un cliente.');go('clientes');}};
 function go(v,detail){VIEW=v;DETAIL=detail||null;render();}
 function render(){
   $$('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v===VIEW));
@@ -868,7 +898,59 @@ function render(){
   else if(VIEW==='ajustes')v.innerHTML=vAjustes();
   bindView();
 }
-function applyBiz(){$('#bizname').textContent=S.settings.nombreNegocio||'PrestaControl';}
+function tipoRec(c){const t=todayStr();return c.vence===t?'hoy':(c.vence>t?'manana':'vencido');}
+// Fila de cobranza unificada: la misma en "Cobros de hoy", en los vencidos y en Recordatorios.
+// o.enGrupo = dentro del desplegable de un cliente · o.panel = dentro del modal de Recordatorios
+function filaCobranza(x,o){
+  const l=x.l, c=x.c; o=o||{};
+  const cl=client(l.clientId)||{nombre:'?'}, tel=(cl.telefono||'').replace(/\D/g,'');
+  const key=l.id+'|'+c.n, ya=avisadosSet().has(key), p=o.panel?'1':'0';
+  const mora=moraDe(c), cob=cobradorDe(c), extra=mora+cob;
+  const total=cRestante(c)+extra, atr=diasAtraso(c);
+  return `<div class="item" style="cursor:default">
+    ${o.enGrupo?'':`<div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>`}
+    <div class="mid">
+      <div class="t1">${o.enGrupo?`Cuota ${c.n}/${l.cuotas.length} · préstamo de ${fmt$(l.monto)}`:esc(cl.nombre)}</div>
+      <div class="t2">${o.enGrupo?'Vence':`Cuota ${c.n}/${l.cuotas.length} · vence`} ${dShort(c.vence)} · <b>${fmt$(total)}</b>${atr>0?` · <span style="color:var(--red)">${atr}d de atraso</span>`:''}</div>
+      ${extra>0?`<div class="t2" style="color:var(--orange)">incluye ${fmt$(mora)} de mora${cob>0?` y ${fmt$(cob)} de cobrador`:''}</div>`:''}
+      ${ya?`<div class="t2 acts"><span class="badge b-ok" data-desavisar="${key}" data-panel="${p}" style="cursor:pointer" title="tocá para sacar la marca">✓ avisado hoy</span></div>`:''}
+      ${tel?'':'<div class="t2">sin teléfono cargado</div>'}
+    </div>
+    <div class="acciones">
+      ${tel?`<button class="btn ${ya?'sec':'green'} mini" data-avisar="${key}" data-panel="${p}">${ya?'Reenviar':'Avisar'}</button>`:''}
+      <button class="btn mini oro" data-reccobrar="${key}" data-panel="${p}">💵 Cobrar</button>
+    </div>
+  </div>`;
+}
+function bindCobranza(){ // sirve igual en el dashboard y dentro del panel de Recordatorios
+  const volver=b=>{b.dataset.panel==='1'?formRecordatorios():render();};
+  $$('[data-avisar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
+    const par=b.dataset.avisar.split('|'), l=loan(par[0]), c=l&&l.cuotas.find(x=>x.n===+par[1]);
+    if(!l||!c)return;
+    waOpen((client(l.clientId)||{}).telefono,recMsg(tipoRec(c),l,c));
+    avisadosMark(b.dataset.avisar); volver(b);});
+  $$('[data-desavisar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
+    avisadosUnmark(b.dataset.desavisar); volver(b);});
+  $$('[data-reccobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
+    const par=b.dataset.reccobrar.split('|'), panel=b.dataset.panel==='1';
+    formCobro(par[0],+par[1],panel?()=>formRecordatorios():null);});
+}
+// "Buen día, Lautaro" · el dueño configura su nombre en Ajustes; el socio usa el suyo
+function nombreDeQuienMira(){
+  if(esSocio()){const s=(S.settings.socios||[]).find(x=>x.id===SESSION.socioId);
+    return (s&&s.nombre)||SESSION.nombre||'';}
+  return (S.settings.nombreDueno||'').trim()||SESSION.nombre||'';
+}
+function saludo(){
+  const h=new Date().getHours();
+  const s=h<12?'Buen día':(h<20?'Buenas tardes':'Buenas noches');
+  const n=nombreDeQuienMira();
+  return n?s+', '+n:s;
+}
+function applyBiz(){
+  const h=$('#saludo'); if(h)h.textContent=saludo();
+  const b=$('#bizname'); if(b)b.textContent=S.settings.nombreNegocio||'PrestaControl';
+}
 
 /* ================= VISTA: INICIO ================= */
 function cobrosDelDia(fecha){ // cuotas PROGRAMADAS para ese día (lo que hay que cobrar)
@@ -970,7 +1052,7 @@ function vLiquidaciones(){
         ${pagado&&!esSocio()?`<div class="t2"><span class="undo" data-liqundo="${x.l.id}">deshacer</span></div>`:''}</div>
       <div class="end"><div class="m1" style="color:${pagado?'var(--green)':'var(--blue)'}">${fmt$(x.monto)}</div>
         ${pagado?'<div class="m2">cobrado</div>':(esSocio()?'<div class="m2">te deben</div>'
-          :`<button class="btn mini" data-liqpagar="${x.l.id}" style="margin-top:6px;background:var(--green);color:#06210f;white-space:nowrap">✅ Ya le pagué</button>`)}</div>
+          :`<button class="btn mini" data-liqpagar="${x.l.id}" style="margin-top:6px;background:var(--green);color:var(--onColor);white-space:nowrap">✅ Ya le pagué</button>`)}</div>
     </div>`;};
   return `
   ${pendientes.length?`
@@ -1256,27 +1338,15 @@ function vInicio(){
     ${Object.entries(porSocio).map(([nom,v])=>repRow('s:'+nom,ini(nom),'shop',nom,v.real,v.total,'var(--blue)',v.loans)).join('')}
   </div>`:'';
 
-  // dentro de un grupo mostramos la cuota sola; suelta, el nombre del cliente
-  const rowCobro=({l,c},enGrupo)=>{
-    const cl=client(l.clientId)||{nombre:'?'}, est=estadoCuota(c);
-    const extra=moraDe(c)+cobradorDe(c);
-    return `<div class="item" data-cobrar="${l.id}|${c.n}">
-      <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
-      <div class="mid"><div class="t1">${enGrupo?'Cuota '+c.n+'/'+l.cuotas.length+' · préstamo de '+fmt$(l.monto):esc(cl.nombre)}</div>
-        <div class="t2">${enGrupo?'vence':'Cuota '+c.n+'/'+l.cuotas.length+' · vence'} ${dShort(c.vence)}${diasAtraso(c)>0?' · <span style="color:var(--red)">'+diasAtraso(c)+'d atraso</span>':''}</div></div>
-      <div class="end"><div class="m1">${fmt$(cRestante(c)+extra)}</div>
-        ${extra>0?`<div class="m2" style="color:var(--orange)">incl. ${fmt$(extra)} mora${cobradorDe(c)>0?'+cobrador':''}</div>`:`<div class="m2">${FREQ[l.frecuencia]}</div>`}</div>
-    </div>`;};
-
   return `
   <div class="stats">
     <div class="stat blue"><div class="lbl">Clientes</div><div class="val">${vClients().length}</div></div>
     <div class="stat gold"><div class="lbl">Préstamos activos</div><div class="val">${activos.length}</div></div>
-    <div class="stat gold"><div class="lbl">Plata prestada</div><div class="val">${fmt$(prestado)}</div><div class="ex">capital activo en la calle</div></div>
+    <div class="stat gold"><div class="lbl">Capital prestado</div><div class="val">${fmt$(prestado)}</div><div class="ex">activo en la calle</div></div>
     <div class="stat blue"><div class="lbl">Por cobrar</div><div class="val">${fmt$(porCobrar)}</div><div class="ex">incluye interés</div></div>
-    <div class="stat orange"><div class="lbl">Cobros de hoy</div><div class="val">${fmt$(hoyMonto)}</div><div class="ex">${hoy.length} cuota${hoy.length===1?'':'s'}</div></div>
+    <div class="stat orange"><div class="lbl">Cuotas de hoy</div><div class="val">${fmt$(hoyMonto)}</div><div class="ex">${hoy.length} cuota${hoy.length===1?'':'s'}</div></div>
     <div class="stat green"><div class="lbl">Cobrado hoy</div><div class="val">${fmt$(cobradoHoy)}</div></div>
-    <div class="stat red"><div class="lbl">Vencidos</div><div class="val">${fmt$(vencMonto)}</div><div class="ex">${venc.length} cuota${venc.length===1?'':'s'} con mora</div></div>
+    <div class="stat red"><div class="lbl">Clientes vencidos</div><div class="val">${agruparPorCliente(venc).length}</div><div class="ex">${fmt$(vencMonto)} en ${venc.length} cuota${venc.length===1?'':'s'}</div></div>
     <div class="stat green"><div class="lbl">Interés en juego</div><div class="val">${fmt$(interes)}</div><div class="ex">ganancia de préstamos activos</div></div>
   </div>
   <div class="btnrow" style="margin-top:4px">
@@ -1292,8 +1362,8 @@ function vInicio(){
   ${vPendientes()}
   ${repartoHTML}
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
-  <div class="list">${hoy.length?hoy.map(x=>rowCobro(x)).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
-  <h2>🔴 Vencidos <span class="cnt">${venc.length}</span></h2>
+  <div class="list">${hoy.length?hoy.map(x=>filaCobranza(x)).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
+  <h2>🔴 Vencidos por cliente <span class="cnt">${agruparPorCliente(venc).length}</span></h2>
   ${venc.length?`<div class="chips">
     ${[['atraso','⏳ Más atrasado'],['reciente','🆕 Reciente'],['monto','💵 Mayor monto'],['cliente','🔤 A-Z cliente']].map(([k,t])=>
       `<button class="${vencSort===k?'on':''}" data-vs="${k}">${t}</button>`).join('')}
@@ -1306,7 +1376,7 @@ function vInicio(){
         <div class="t2">${g.items.length} cuota${g.items.length===1?'':'s'} vencida${g.items.length===1?'':'s'}${varios?` · ${g.loans.size} préstamos`:''} · ${g.atraso} día${g.atraso===1?'':'s'} de atraso</div>
         ${g.extra>0?`<div class="t2" style="color:var(--orange)">incl. ${fmt$(g.extra)} mora+cobrador</div>`:''}</div>
       <div class="end"><div class="m1" style="color:var(--red)">${fmt$(g.total)}</div><div class="m2">debe</div></div>
-    </div>${open?`<div class="repbox">${g.items.map(x=>rowCobro(x,varios)).join('')}</div>`:''}`;
+    </div>${open?`<div class="repbox">${g.items.map(x=>filaCobranza(x,{enGrupo:true})).join('')}</div>`:''}`;
   }).join(''):'<div class="empty">Nada vencido. ¡Todo al día! 🎉</div>'}</div>
   ${venc.length?`<div class="hint" style="text-align:center">${venc.length} cuota${venc.length===1?'':'s'} de ${agruparPorCliente(venc).length} cliente${agruparPorCliente(venc).length===1?'':'s'}. Tocá un cliente para ver y cobrar sus cuotas.</div>`:''}`;
 }
@@ -1504,7 +1574,7 @@ function vPrestamo(id){
         :(r.socioParteReal>0?(esSocio()
           ?`<div class="resume" style="color:var(--blue);margin-top:4px">⏳ El dueño todavía no te pasó tus ${fmt$(r.socioParteReal)} de este préstamo.</div>`
           :`<div class="resume" style="margin-top:4px">Préstamo terminado: le corresponden <b>${fmt$(r.socioParteReal)}</b> a ${esc(r.socioNom)}.
-             <button class="btn mini" data-liqpagar="${id}" style="margin-top:8px;background:var(--green);color:#06210f">✅ Ya le pagué</button></div>`):'')):''}
+             <button class="btn mini" data-liqpagar="${id}" style="margin-top:8px;background:var(--green);color:var(--onColor)">✅ Ya le pagué</button></div>`):'')):''}
       ${esSocio()?'':`<button class="btn sec mini" data-reparto="${id}" style="margin-top:4px">✏️ Editar reparto</button>`}
     </div>`;})()}
   <h2>🗓 Cuotas</h2>
@@ -1540,7 +1610,7 @@ function vPrestamo(id){
     <button class="btn" data-contrato="${id}" style="background:var(--blue);color:#fff">📄 Generar contrato</button>
     <button class="btn" data-tyc="${id}" style="background:#25D366;color:#fff">📲 Enviar T&C</button>
   </div>
-  ${l.status==='activo'?`<button class="btn" data-renovar="${id}" style="margin-top:10px;background:var(--gold);color:#14110a">🔄 Renovar préstamo</button>`:''}
+  ${l.status==='activo'?`<button class="btn" data-renovar="${id}" style="margin-top:10px;background:var(--gold);color:var(--onColor)">🔄 Renovar préstamo</button>`:''}
   ${l.status==='activo'&&!l.acuerdo?`<button class="btn sec" data-acuerdo="${id}" style="margin-top:10px">🤝 Fijar la deuda a un monto acordado</button>`:''}
   <div class="btnrow">
     ${l.status==='activo'?`<button class="btn red" data-cancel-loan="${id}">Cancelar préstamo</button>`:''}
@@ -1681,44 +1751,18 @@ function migrarAvisados(){
 let recFilter='hoy';
 function formRecordatorios(){
   const tipos=[['hoy','Vencen hoy'],['manana','Vencen mañana'],['vencido','Vencidos']];
-  const lista=recLista(recFilter), avis=avisadosSet();
-  const totalLista=lista.reduce((a,{c})=>a+cRestante(c)+moraDe(c)+cobradorDe(c),0);
+  const lista=recLista(recFilter);
+  const totalLista=lista.reduce((a,x)=>a+cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c),0);
   modal(`<h3>🔔 Recordatorios</h3>
   <div class="hint">"Avisar" abre WhatsApp con el mensaje listo y deja el cliente marcado <b>✓ avisado</b> por el resto del día, en todos los dispositivos y también para tus socios. Tocá la marca si querés sacarla. Los mensajes se editan en Ajustes › Recordatorios.</div>
   <div class="chips" style="margin-top:12px">
     ${tipos.map(([k,t])=>`<button class="${recFilter===k?'on':''}" data-rf="${k}">${t} (${recLista(k).length})</button>`).join('')}
   </div>
   ${lista.length?`<div class="resume" style="margin-top:10px">${lista.length} cuota${lista.length===1?'':'s'} · total a cobrar <b>${fmt$(totalLista)}</b></div>`:''}
-  <div class="list">${lista.length?lista.map(({l,c})=>{
-    const cl=client(l.clientId)||{nombre:'?'}, tel=(cl.telefono||'').replace(/\D/g,'');
-    const key=l.id+'|'+c.n, ya=avis.has(key), total=cRestante(c)+moraDe(c)+cobradorDe(c);
-    const extra=moraDe(c)+cobradorDe(c);
-    return `<div class="item" style="cursor:default">
-      <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
-      <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
-        <div class="t2">Cuota ${c.n}/${l.cuotas.length} · <b>${fmt$(total)}</b>${recFilter==='vencido'?' · vencía '+dShort(c.vence):''}</div>
-        ${extra>0?`<div class="t2" style="color:var(--orange)">incluye ${fmt$(extra)} de mora${cobradorDe(c)>0?' y cobrador':''}</div>`:''}
-        ${ya?`<div class="t2 acts"><span class="badge b-ok" data-desavisar="${key}" style="cursor:pointer" title="tocá para sacar la marca">✓ avisado hoy</span></div>`:''}
-        ${tel?'':'<div class="t2">sin teléfono cargado</div>'}</div>
-      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
-        ${tel?`<button class="btn ${ya?'sec':'green'} mini" data-avisar="${key}" style="white-space:nowrap">${ya?'Reenviar':'Avisar'}</button>`:''}
-        <button class="btn mini" data-reccobrar="${key}" style="background:var(--gold);color:#14110a;white-space:nowrap">💵 Cobrar</button>
-      </div>
-    </div>`;}).join(''):'<div class="empty">No hay clientes en esta lista 🎉</div>'}</div>`);
+  <div class="list">${lista.length?lista.map(x=>filaCobranza(x,{panel:true})).join('')
+    :'<div class="empty">No hay clientes en esta lista 🎉</div>'}</div>`);
   $$('[data-rf]').forEach(b=>b.onclick=()=>{recFilter=b.dataset.rf;formRecordatorios();});
-  $$('[data-avisar]').forEach(b=>b.onclick=()=>{
-    const[id,n]=b.dataset.avisar.split('|'); const l=loan(id); const c=l&&l.cuotas.find(x=>x.n===+n);
-    if(!l||!c)return; const cl=client(l.clientId)||{};
-    waOpen(cl.telefono,recMsg(recFilter,l,c));
-    avisadosMark(b.dataset.avisar); formRecordatorios();
-  });
-  $$('[data-desavisar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
-    avisadosUnmark(b.dataset.desavisar); formRecordatorios();});
-  // cobrar sin salir del panel: al terminar (o al cerrar) se vuelve a esta misma lista
-  $$('[data-reccobrar]').forEach(b=>b.onclick=()=>{
-    const[id,n]=b.dataset.reccobrar.split('|');
-    formCobro(id,+n,()=>formRecordatorios());
-  });
+  bindCobranza();
 }
 
 /* ----- PDF nativo del contrato (jsPDF local, sin CDN) ----- */
@@ -2234,8 +2278,15 @@ function vAjustes(){
   const st=S.settings,fb=fbCfg();
   if(esSocio())return vMiCuenta();
   return `
+  <h2>🎨 Apariencia</h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <label>Tema</label>
+    <select id="set-tema"><option value="claro">☀️ Claro</option><option value="oscuro">🌙 Oscuro</option></select>
+    <div class="hint">Es de este dispositivo: podés tener la PC en claro y el celular en oscuro.</div>
+  </div>
   <h2>🏪 Negocio</h2>
   <div class="list" style="padding:4px 14px 16px">
+    <label>Tu nombre (para el saludo)</label><input id="set-dueno" value="${esc(st.nombreDueno||'')}" placeholder="Lautaro">
     <label>Nombre del negocio</label><input id="set-nombre" value="${esc(st.nombreNegocio)}">
     <label>Símbolo de moneda</label><input id="set-moneda" value="${esc(st.moneda)}" style="max-width:120px">
     <label>Alias para cobrar (aparece en los términos y condiciones)</label><input id="set-alias" value="${esc(st.alias||'')}" placeholder="PRESTAMOSPPP.1986">
@@ -2444,7 +2495,7 @@ function formSimulador(){
   <div id="sim-out"></div>
   <div class="btnrow" style="margin-top:16px">
     <button class="btn sec" id="sim-limpiar">Limpiar</button>
-    <button class="btn" id="sim-crear" style="background:var(--gold);color:#14110a">💵 Crear préstamo con estos datos</button>
+    <button class="btn" id="sim-crear" style="background:var(--gold);color:var(--onColor)">💵 Crear préstamo con estos datos</button>
   </div>`);
   const upd=()=>{
     const m=+$('#sim-monto').value||0,i=+$('#sim-int').value||0,n=+$('#sim-n').value||0,f=$('#sim-freq').value;
@@ -3530,6 +3581,7 @@ function importar(file){
 
 /* ================= BINDINGS ================= */
 function bindView(){
+  bindCobranza(); // avisar / cobrar, igual acá que en el panel de Recordatorios
   $$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
   $$('[data-cli]').forEach(b=>b.onclick=()=>go('clientes',b.dataset.cli));
   $$('[data-loan]').forEach(b=>b.onclick=()=>go('prestamos',b.dataset.loan));
@@ -3656,8 +3708,10 @@ function bindView(){
     $$('#set-dias button').forEach(b=>b.onclick=()=>b.classList.toggle('on'));
     $$('#set-cobbordes button').forEach(b=>b.onclick=()=>
       $$('#set-cobbordes button').forEach(x=>x.classList.toggle('on',x===b)));
+    {const t=$('#set-tema');if(t){t.value=temaActual();t.onchange=()=>cambiarTema(t.value);}}
     sv.onclick=()=>{
       S.settings.nombreNegocio=$('#set-nombre').value.trim()||'Mi Negocio';
+      S.settings.nombreDueno=$('#set-dueno').value.trim();
       S.settings.moneda=$('#set-moneda').value.trim()||'$';
       S.settings.alias=$('#set-alias').value.trim();
       S.settings.mora={tipo:moratipo,valor:+$('#set-moraval').value||0,porDia};
