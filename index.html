@@ -272,7 +272,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=72; // mantener a la par del número de caché en sw.js
+const APP_VER=73; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -453,8 +453,11 @@ function socioNombre(id){
   return s?s.nombre:null;
 }
 // mueve TODOS los préstamos de un cliente al socio elegido (o los devuelve al dueño si gestorId es null)
+// mueve los préstamos EN CURSO de un cliente al socio elegido (o los devuelve al dueño).
+// Los ya terminados no se tocan: su ganancia ya está repartida —y a veces liquidada—,
+// moverlos cambiaría cuentas cerradas y generaría una deuda con el socio que no existió.
 function reasignarPrestamosDeCliente(clientId,gestorId){
-  const ls=S.loans.filter(l=>l.clientId===clientId);
+  const ls=S.loans.filter(l=>l.clientId===clientId&&l.status==='activo');
   ls.forEach(l=>{
     if(gestorId){l.gestorId=gestorId;l.gestorPct=socioPct(gestorId);l.gestorNombre=socioNombre(gestorId);}
     else{delete l.gestorId;delete l.gestorPct;delete l.gestorNombre;}
@@ -2160,7 +2163,7 @@ function formCliente(id){
   ${esSocio()?'':`<label>Gestionado por</label>
   <select id="f-gestor"><option value="">Yo (el dueño)</option>
     ${(S.settings.socios||[]).map(x=>`<option value="${x.id}" ${c.gestorId===x.id?'selected':''}>${esc(x.nombre)}</option>`).join('')}</select>
-  <div class="hint">Si lo asignás a un socio, ese cliente aparece en su cuenta. Si el cliente ya tenía préstamos cargados, la app te va a preguntar si también se los pasás.</div>`}
+  <div class="hint">Si lo asignás a un socio, ese cliente aparece en su cuenta. Si tiene préstamos <b>en curso</b>, la app te va a preguntar si también se los pasás. Los préstamos ya terminados no se tocan nunca.</div>`}
   <button class="btn" id="f-save" style="margin-top:18px">Guardar cliente</button>`);
   let tipo=c.tipo||'persona';
   $$('#f-tipo button').forEach(b=>b.onclick=()=>{tipo=b.dataset.v;
@@ -2176,18 +2179,20 @@ function formCliente(id){
     if(esSocio())obj.gestorId=SESSION.socioId;
     else{const g=$('#f-gestor');obj.gestorId=g&&g.value?g.value:null;}
     saveClient(obj);
-    // si el dueño cambió de gestor, los préstamos que ya tenía ese cliente NO se mueven solos:
-    // se los ofrecemos, porque si no el socio ve el cliente pero sin ninguno de sus préstamos
+    // si el dueño cambió de gestor, los préstamos EN CURSO no se mueven solos: se los ofrecemos,
+    // porque si no el socio ve el cliente pero sin sus préstamos. Los terminados quedan como están.
     if(id&&!esSocio()&&obj.gestorId!==gestorAntes){
-      const pend=S.loans.filter(l=>l.clientId===obj.id&&l.gestorId!==(obj.gestorId||undefined));
+      const pend=S.loans.filter(l=>l.clientId===obj.id&&l.status==='activo'&&l.gestorId!==(obj.gestorId||undefined));
+      const cerrados=S.loans.filter(l=>l.clientId===obj.id&&l.status!=='activo').length;
       if(pend.length){
         const nom=obj.gestorId?socioNombre(obj.gestorId):null;
+        const nota=cerrados?`\n\nLos ${cerrados} préstamo(s) ya terminados de este cliente no se tocan: quedan como están, con el reparto que tuvieron.`:'';
         const msg=obj.gestorId
-          ?`Este cliente ya tiene ${pend.length} préstamo(s) cargado(s).\n\n¿Pasárselos también a ${nom} (${socioPct(obj.gestorId)}% de la ganancia para el socio)?\n\nSi decís que no, ${nom} va a ver al cliente pero sin esos préstamos.`
-          :`Este cliente ya tiene ${pend.length} préstamo(s) asignado(s) a un socio.\n\n¿Pasarlos también a tu nombre y sacarles el reparto de ganancia?`;
+          ?`Este cliente tiene ${pend.length} préstamo(s) en curso.\n\n¿Pasárselos también a ${nom} (${socioPct(obj.gestorId)}% de la ganancia para el socio)?\n\nSi decís que no, ${nom} va a ver al cliente pero sin esos préstamos.${nota}`
+          :`Este cliente tiene ${pend.length} préstamo(s) en curso asignado(s) a un socio.\n\n¿Pasarlos también a tu nombre y sacarles el reparto de ganancia?${nota}`;
         if(confirm(msg)){
           const n=reasignarPrestamosDeCliente(obj.id,obj.gestorId);
-          alert(`Listo ✅\n${n} préstamo(s) ${obj.gestorId?'quedaron a nombre de '+nom:'volvieron a tu nombre'}.`);
+          alert(`Listo ✅\n${n} préstamo(s) en curso ${obj.gestorId?'quedaron a nombre de '+nom:'volvieron a tu nombre'}.${cerrados?'\nLos ya terminados quedaron sin cambios.':''}`);
         }
       }
     }
