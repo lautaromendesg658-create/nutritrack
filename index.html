@@ -281,7 +281,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=75; // mantener a la par del número de caché en sw.js
+const APP_VER=76; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1148,7 +1148,7 @@ function vCumplimiento(clientId){
   if(R.evaluables)lineas.push(`⏱ ${R.enTermino} de ${R.evaluables} cuotas pagadas en término (${R.pct}%)`);
   if(R.tarde)lineas.push(`📈 Cuando se atrasa promedia ${R.atrasoProm} día${R.atrasoProm===1?'':'s'} · el peor fue ${R.peorAtraso}`);
   if(R.mora||R.cobrador)lineas.push(`💰 Te pagó ${fmt$(R.mora)} de mora${R.cobrador?` y ${fmt$(R.cobrador)} de cobrador`:''}`);
-  if(R.renovados)lineas.push(`🔄 Renovó ${R.renovados} vez${R.renovados===1?'':'ces'} con saldo pendiente`);
+  if(R.renovados)lineas.push(`🔄 Renovó ${R.renovados} ${R.renovados===1?'vez':'veces'} con saldo pendiente`);
   if(R.acuerdos)lineas.push(`🤝 Tiene ${R.acuerdos} deuda acordada a la baja`);
   if(R.canceladosConSaldo)lineas.push(`❌ ${R.canceladosConSaldo} préstamo cancelado con saldo sin cobrar`);
   if(R.neutras)lineas.push(`<span style="color:var(--muted)">${R.neutras} cuota${R.neutras===1?'':'s'} quedaron saldadas por renovación o acuerdo (no cuentan para la puntualidad)</span>`);
@@ -1157,7 +1157,7 @@ function vCumplimiento(clientId){
   <div class="list" style="padding:14px;border-left:3px solid ${N.col}">
     <div class="t1" style="color:${N.col};font-size:16px">${N.ic} ${N.txt}</div>
     ${sub?`<div class="t2" style="color:${N.col}">${sub}</div>`:''}
-    <div class="t2" style="margin-top:8px">Le prestaste ${R.prestamos} vez${R.prestamos===1?'':'ces'} · ${fmt$(R.nuevo)} de plata nueva${R.desde?` · desde ${dLong(R.desde)}`:''}</div>
+    <div class="t2" style="margin-top:8px">Le prestaste ${R.prestamos} ${R.prestamos===1?'vez':'veces'} · ${fmt$(R.nuevo)} de plata nueva${R.desde?` · desde ${dLong(R.desde)}`:''}</div>
     <div class="t2">Te devolvió ${fmt$(R.cobrado)} · le ganaste <b style="color:var(--green)">${fmt$(R.ganancia)}</b>${R.deudaHoy>0?` · hoy te debe ${fmt$(R.deudaHoy)}`:''}</div>
     <div class="t2" style="margin-top:8px;line-height:1.9">${lineas.join('<br>')}</div>
     ${R.tira.length?`<div class="t2" style="margin-top:10px">Últimas ${Math.min(20,R.tira.length)} cuotas <span style="color:var(--muted)">(la más vieja a la izquierda)</span></div>
