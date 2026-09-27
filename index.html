@@ -86,6 +86,15 @@
   /* cuotas desplegadas dentro del grupo de un cliente: sangradas y sin repetir su inicial */
   .repbox .item{padding-left:24px;border-bottom:none;border-top:1px solid var(--line)}
   .repbox .item>.ava{display:none}
+  /* tira de cuotas del historial de pago */
+  .tira{display:flex;gap:3px;flex-wrap:wrap;margin-top:6px}
+  .tira i{width:13px;height:18px;border-radius:3px;display:block}
+  .tl{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:middle}
+  .tira i.ok,.tl.ok{background:var(--green)}
+  .tira i.tarde,.tl.tarde{background:var(--gold)}
+  .tira i.venc,.tl.venc{background:var(--orange)}
+  .tira i.mala,.tl.mala{background:var(--red)}
+  .tira i.neu,.tl.neu{background:#3a4050}
   .repsub{display:flex;align-items:center;gap:12px;padding:11px 14px 11px 24px;border-top:1px solid var(--line);cursor:pointer}
   .repsub:active{background:var(--bg)}
   .repsub .mid{flex:1;min-width:0}
@@ -272,7 +281,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=74; // mantener a la par del número de caché en sw.js
+const APP_VER=75; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -729,6 +738,7 @@ function fbConnect(){
         if((S.settings.updatedAt||0)>0)fbPushSettings();
       }).catch(()=>{});
       fbSetStatus('on','Sincronizado');
+      setTimeout(fbCopiaDiaria,8000); // con los datos ya sincronizados
     }catch(e){console.error(e);fbSetStatus('err','Config inválida');}
   }).catch(()=>fbSetStatus('err','Sin conexión a Firebase'));
 }
@@ -746,6 +756,91 @@ function fbPushSettings(){
 }
 function fbDisconnect(){FB.unsubs.forEach(u=>u());FB.unsubs=[];FB.base=null;
   localStorage.removeItem(LS+'-fb');fbSetStatus('off','Sin sincronizar');}
+
+/* ================= COPIAS DE SEGURIDAD AUTOMÁTICAS =================
+   Una por día, guardada en tu propio Firebase, aparte de los datos vivos.
+   No incluye las imágenes de los documentos (son lo pesado y siguen estando
+   en los datos normales). Se guardan las de los últimos 45 días. */
+const BK_DIAS=45, BK_MAX=900000;
+function datosParaCopia(){
+  return JSON.stringify({v:APP_VER,t:Date.now(),
+    settings:S.settings,clients:S.clients,loans:S.loans,drafts:S.drafts||[]});
+}
+async function fbCopiaDiaria(){
+  if(!FB.base||esSocio())return null;          // la hace el dueño, una vez por día
+  const hoy=todayStr();
+  if(localStorage.getItem(LS+'-bkdia')===hoy)return null; // ya se hizo en este dispositivo
+  try{
+    const ref=FB.base.collection('backups').doc(hoy);
+    const ya=await ref.get();
+    if(ya.exists){localStorage.setItem(LS+'-bkdia',hoy);return null;}
+    const json=datosParaCopia();
+    if(json.length>BK_MAX){console.warn('copia demasiado grande, se omite');return null;}
+    await ref.set({json,t:Date.now(),v:APP_VER,
+      nClients:(S.clients||[]).length,nLoans:(S.loans||[]).length,bytes:json.length});
+    localStorage.setItem(LS+'-bkdia',hoy);
+    podarCopias(); // no esperamos: si las reglas no dejan borrar, no pasa nada
+    return hoy;
+  }catch(e){console.error('copia diaria',e);return null;}
+}
+function podarCopias(){
+  const corte=ymd(new Date(Date.now()-BK_DIAS*DAY));
+  FB.base.collection('backups').get().then(snap=>{
+    snap.forEach(d=>{if(d.id<corte)d.ref.delete().catch(()=>{});});
+  }).catch(()=>{});
+}
+async function listarCopias(){
+  if(!FB.base)return [];
+  try{const snap=await FB.base.collection('backups').get();
+    const out=[];snap.forEach(d=>{const x=d.data()||{};
+      out.push({id:d.id,t:x.t||0,nClients:x.nClients||0,nLoans:x.nLoans||0,bytes:x.bytes||0});});
+    return out.sort((a,b)=>a.id<b.id?1:-1);
+  }catch(e){console.error(e);return [];}
+}
+async function restaurarCopia(fecha){
+  if(esSocio())return alert('Solo el dueño puede restaurar una copia.');
+  if(!FB.base)return alert('Necesitás la sincronización conectada para restaurar.');
+  let d;
+  try{d=(await FB.base.collection('backups').doc(fecha).get()).data();}catch(e){}
+  if(!d||!d.json)return alert('No se encontró esa copia.');
+  let p;try{p=JSON.parse(d.json);}catch(e){return alert('La copia está dañada.');}
+  const nC=(p.clients||[]).length, nL=(p.loans||[]).length;
+  if(!confirm(`Restaurar la copia del ${dLong(fecha)}\n\n`
+    +`Contiene ${nC} cliente(s) y ${nL} préstamo(s).\n\n`
+    +`Vuelve a dejar los datos como estaban ese día: lo que se haya borrado o cambiado después se recupera.\n`
+    +`Lo que cargaste después NO se borra.\n\n¿Seguimos?`))return;
+  if((prompt('Escribí RESTAURAR para confirmar:')||'').trim().toUpperCase()!=='RESTAURAR')return;
+  const meter=(arr,tgt,kind)=>{(arr||[]).forEach(o=>{
+    const i=tgt.findIndex(x=>x.id===o.id);
+    const obj={...o}; touch(obj);
+    if(i<0)tgt.push(obj); else tgt[i]=obj;
+    fbPush(kind,obj);});};
+  meter(p.clients,S.clients,'client');
+  meter(p.loans,S.loans,'loan');
+  meter(p.drafts,S.drafts,'draft');
+  if(p.settings){const av=S.settings.avisados; // los avisos de hoy no se pisan
+    S.settings=normSettings(p.settings); if(av)S.settings.avisados=av;
+    touch(S.settings); fbPushSettings(); applyBiz();}
+  persist();render();
+  alert(`Listo ✅\nSe restauraron ${nC} cliente(s) y ${nL} préstamo(s) de la copia del ${dLong(fecha)}.`);
+}
+function formCopias(){
+  modal(`<h3>💾 Copias de seguridad</h3>
+  <div class="hint">Se guarda una copia por día en tu propio Firebase, aparte de los datos que usás. Se conservan las de los últimos ${BK_DIAS} días. No incluyen las fotos de los documentos.</div>
+  <div id="bk-lista"><div class="hint">Buscando copias…</div></div>
+  <div class="hint" style="margin-top:14px">Esto te cubre de un borrado o un error. Para estar cubierto también si perdés el acceso a la cuenta de Google, bajate un archivo con <b>⬇️ Exportar datos</b> de vez en cuando y guardalo aparte.</div>`);
+  listarCopias().then(cs=>{
+    const box=$('#bk-lista'); if(!box)return;
+    if(!cs.length){box.innerHTML='<div class="empty" style="padding:18px">Todavía no hay copias. Se crea una sola al abrir la app cada día.</div>';return;}
+    box.innerHTML='<div class="list">'+cs.map(c=>`<div class="item" style="cursor:default">
+      <div class="ava">💾</div>
+      <div class="mid"><div class="t1">${dLong(c.id)}</div>
+        <div class="t2">${c.nClients} cliente(s) · ${c.nLoans} préstamo(s) · ${Math.round(c.bytes/1024)} KB</div></div>
+      <button class="btn sec mini" data-restcopia="${c.id}">Restaurar</button>
+    </div>`).join('')+'</div>';
+    $$('[data-restcopia]').forEach(b=>b.onclick=()=>{closeModal();restaurarCopia(b.dataset.restcopia);});
+  });
+}
 
 /* ================= RELOJ ================= */
 function tickClock(){
@@ -959,6 +1054,120 @@ function vGanado(){
       :`Ya recuperaste el capital de los ${N.activos} préstamo${N.activos===1?'':'s'} activo${N.activos===1?'':'s'}: todo lo que cobres de acá en más es ganancia. 🎉`}</div>`:''}
   </div>`;
 }
+/* ================= CÓMO PAGA CADA CLIENTE =================
+   Separa dos cosas distintas: si PAGA (riesgo real) y si paga A TIEMPO
+   (molestia de cobranza, que además genera mora a favor tuyo). */
+const DIAS_ABANDONO=30;
+function cumplimiento(clientId){
+  const ls=vLoans().filter(l=>l.clientId===clientId);
+  const hoy=todayStr(), R={
+    prestamos:ls.length,prestado:0,nuevo:0,cobrado:0,ganancia:0,mora:0,cobrador:0,
+    enTermino:0,tarde:0,vencidas:0,abandonadas:0,neutras:0,
+    atrasoProm:0,peorAtraso:0,renovados:0,acuerdos:0,canceladosConSaldo:0,
+    deudaHoy:0,desde:'',tira:[]};
+  let sumAtraso=0;
+  ls.forEach(l=>{
+    R.prestado+=l.monto||0;
+    R.nuevo+=Math.max(0,(l.monto||0)-(l.refinanciado||0));
+    R.cobrado+=loanTotalCobrado(l);
+    R.ganancia+=loanGananciaRealizada(l);
+    R.mora+=l.cuotas.reduce((a,c)=>a+cMoraPagada(c),0);
+    R.cobrador+=l.cuotas.reduce((a,c)=>a+cCobradorPagado(c),0);
+    if(l.status==='activo')R.deudaHoy+=loanDeudaTotal(l);
+    if(l.status==='renovado')R.renovados++;
+    if(l.acuerdo)R.acuerdos++;
+    if(l.status==='cancelado'&&loanRestante(l)>0)R.canceladosConSaldo++;
+    if(!R.desde||l.inicio<R.desde)R.desde=l.inicio;
+    l.cuotas.forEach(c=>{
+      const pagos=c.pagos||[], saldada=cRestante(c)<=0;
+      // las saldadas por renovación o por un acuerdo no dicen nada de cómo paga
+      const neutra=!!(c.esAcuerdo||c.congelada||pagos.some(p=>p.renov));
+      let e=null;
+      if(saldada&&neutra)e='neu';
+      else if(saldada&&pagos.length){
+        const ult=Math.max(...pagos.map(p=>p.t||0));
+        if(ult<=dueAt(c.vence).getTime())e='ok';
+        else{e='tarde';
+          const d=Math.max(1,Math.round((ult-dueAt(c.vence).getTime())/DAY));
+          sumAtraso+=d; if(d>R.peorAtraso)R.peorAtraso=d;}
+      }
+      else if(!saldada&&c.vence<hoy){
+        const d=Math.round((pd(hoy).getTime()-pd(c.vence).getTime())/DAY);
+        e=d>DIAS_ABANDONO?'mala':'venc';
+      }
+      if(!e)return; // cuota futura: no cuenta todavía
+      R[{ok:'enTermino',tarde:'tarde',venc:'vencidas',mala:'abandonadas',neu:'neutras'}[e]]++;
+      R.tira.push({v:c.vence,e});
+    });
+  });
+  R.tira.sort((a,b)=>a.v<b.v?-1:1);
+  R.evaluables=R.enTermino+R.tarde+R.vencidas+R.abandonadas;
+  R.pct=R.evaluables?Math.round(R.enTermino*100/R.evaluables):0;
+  R.atrasoProm=R.tarde?Math.round(sumAtraso/R.tarde):0;
+  R.problemas=R.abandonadas>0||R.acuerdos>0||R.canceladosConSaldo>0;
+  if(!ls.length)R.nivel='nuevo';
+  else if(R.problemas)R.nivel='malo';
+  else if(R.evaluables<5)R.nivel='poco';
+  else if(R.pct>=80)R.nivel='bueno';
+  else R.nivel='regular';
+  return R;
+}
+const NIVEL={
+  nuevo:{txt:'SIN HISTORIAL',col:'var(--muted)',ic:'🆕'},
+  poco :{txt:'POCO HISTORIAL',col:'var(--blue)',ic:'🔎'},
+  bueno:{txt:'CONFIABLE',col:'var(--green)',ic:'✅'},
+  regular:{txt:'IRREGULAR',col:'var(--gold)',ic:'⚠️'},
+  malo :{txt:'PROBLEMÁTICO',col:'var(--red)',ic:'🔴'}};
+function tiraHTML(tira,max){
+  const t=tira.slice(-(max||20));
+  if(!t.length)return '';
+  const cls={ok:'ok',tarde:'tarde',venc:'venc',mala:'mala',neu:'neu'};
+  return `<div class="tira">${t.map(x=>`<i class="${cls[x.e]}" title="${dShort(x.v)}"></i>`).join('')}</div>`;
+}
+// línea corta para los formularios, en el momento de decidir
+function resumenCumplimiento(clientId){
+  const R=cumplimiento(clientId), N=NIVEL[R.nivel];
+  if(R.nivel==='nuevo')return `<div class="hint">🆕 Cliente nuevo: es el primer préstamo que le das.</div>`;
+  const datos=[];
+  if(R.evaluables)datos.push(`${R.enTermino}/${R.evaluables} cuotas en término`);
+  if(R.abandonadas)datos.push(`<b style="color:var(--red)">${R.abandonadas} sin cobrar</b>`);
+  if(R.acuerdos)datos.push(`<b style="color:var(--red)">deuda acordada</b>`);
+  if(R.renovados)datos.push(`${R.renovados} renovación${R.renovados===1?'':'es'}`);
+  return `<div class="hint" style="border-left:3px solid ${N.col};padding-left:8px">
+    ${N.ic} <b style="color:${N.col}">${N.txt}</b> · ${datos.join(' · ')}</div>`;
+}
+function vCumplimiento(clientId){
+  const R=cumplimiento(clientId), N=NIVEL[R.nivel];
+  if(R.nivel==='nuevo')return '';
+  const sub=(R.nivel==='regular'&&!R.problemas&&R.pct<60)?'paga siempre, pero tarde'
+    :(R.nivel==='poco')?'todavía es pronto para calificarlo':'';
+  const lineas=[];
+  if(R.abandonadas)lineas.push(`🔴 <b>${R.abandonadas} cuota${R.abandonadas===1?'':'s'} sin cobrar</b> hace más de ${DIAS_ABANDONO} días`);
+  else lineas.push('✅ Nunca quedó una cuota sin cobrar');
+  if(R.vencidas)lineas.push(`🟠 Ahora mismo tiene ${R.vencidas} cuota${R.vencidas===1?'':'s'} vencida${R.vencidas===1?'':'s'}`);
+  if(R.evaluables)lineas.push(`⏱ ${R.enTermino} de ${R.evaluables} cuotas pagadas en término (${R.pct}%)`);
+  if(R.tarde)lineas.push(`📈 Cuando se atrasa promedia ${R.atrasoProm} día${R.atrasoProm===1?'':'s'} · el peor fue ${R.peorAtraso}`);
+  if(R.mora||R.cobrador)lineas.push(`💰 Te pagó ${fmt$(R.mora)} de mora${R.cobrador?` y ${fmt$(R.cobrador)} de cobrador`:''}`);
+  if(R.renovados)lineas.push(`🔄 Renovó ${R.renovados} vez${R.renovados===1?'':'ces'} con saldo pendiente`);
+  if(R.acuerdos)lineas.push(`🤝 Tiene ${R.acuerdos} deuda acordada a la baja`);
+  if(R.canceladosConSaldo)lineas.push(`❌ ${R.canceladosConSaldo} préstamo cancelado con saldo sin cobrar`);
+  if(R.neutras)lineas.push(`<span style="color:var(--muted)">${R.neutras} cuota${R.neutras===1?'':'s'} quedaron saldadas por renovación o acuerdo (no cuentan para la puntualidad)</span>`);
+  return `
+  <h2>📊 Cómo paga este cliente</h2>
+  <div class="list" style="padding:14px;border-left:3px solid ${N.col}">
+    <div class="t1" style="color:${N.col};font-size:16px">${N.ic} ${N.txt}</div>
+    ${sub?`<div class="t2" style="color:${N.col}">${sub}</div>`:''}
+    <div class="t2" style="margin-top:8px">Le prestaste ${R.prestamos} vez${R.prestamos===1?'':'ces'} · ${fmt$(R.nuevo)} de plata nueva${R.desde?` · desde ${dLong(R.desde)}`:''}</div>
+    <div class="t2">Te devolvió ${fmt$(R.cobrado)} · le ganaste <b style="color:var(--green)">${fmt$(R.ganancia)}</b>${R.deudaHoy>0?` · hoy te debe ${fmt$(R.deudaHoy)}`:''}</div>
+    <div class="t2" style="margin-top:8px;line-height:1.9">${lineas.join('<br>')}</div>
+    ${R.tira.length?`<div class="t2" style="margin-top:10px">Últimas ${Math.min(20,R.tira.length)} cuotas <span style="color:var(--muted)">(la más vieja a la izquierda)</span></div>
+    ${tiraHTML(R.tira,20)}
+    <div class="t2" style="margin-top:6px;color:var(--muted);font-size:11px">
+      <span class="tl ok"></span> en término &nbsp; <span class="tl tarde"></span> tarde &nbsp;
+      <span class="tl venc"></span> vencida &nbsp; <span class="tl mala"></span> sin cobrar &nbsp;
+      <span class="tl neu"></span> renovación/acuerdo</div>`:''}
+  </div>`;
+}
 function vPendientes(){ // contratos armados que todavía no se convirtieron en préstamo
   const ds=vDrafts().slice().sort((a,b)=>
     (b.firmado?1:0)-(a.firmado?1:0)||(b.createdAt||0)-(a.createdAt||0)); // los firmados primero
@@ -1129,9 +1338,10 @@ function vClientes(){
   <div class="list">${cs.length?cs.map(c=>{
     const act=vLoans().filter(l=>l.clientId===c.id&&l.status==='activo').length;
     const deuda=clienteDeuda(c.id);
+    const R=cumplimiento(c.id), N=NIVEL[R.nivel];
     return `<div class="item" data-cli="${c.id}">
       <div class="ava ${c.tipo==='comercio'?'shop':''}">${esc(ini(c.nombre))}</div>
-      <div class="mid"><div class="t1">${esc(c.nombre)} <span class="badge ${c.tipo==='comercio'?'b-com':'b-per'}">${c.tipo==='comercio'?'Comercio':'Persona'}</span></div>
+      <div class="mid"><div class="t1">${esc(c.nombre)} <span class="badge ${c.tipo==='comercio'?'b-com':'b-per'}">${c.tipo==='comercio'?'Comercio':'Persona'}</span>${R.nivel!=='nuevo'?` <span title="${N.txt}" style="color:${N.col};font-size:11px">●</span>`:''}</div>
       <div class="t2">${esc(c.telefono||'sin teléfono')}${act?` · ${act} préstamo${act>1?'s':''} activo${act>1?'s':''}`:''}</div>
       ${conFiltro&&cliGestor==='todos'&&c.gestorId&&socioNombre(c.gestorId)?`<div class="t2">🤝 ${esc(socioNombre(c.gestorId))}</div>`:''}</div>
       <div class="end">${deuda>0?`<div class="m1">${fmt$(deuda)}</div><div class="m2">debe</div>`:'<div class="m2">sin deuda</div>'}</div>
@@ -1169,6 +1379,7 @@ function vCliente(id){
   <div class="docgrid">${docs.map(d=>`<div class="doc" data-doc="${d.id}">
     ${d.tipo&&d.tipo.includes('pdf')?'<div class="pdf">📄</div>':`<img src="${d.data}" loading="lazy">`}
     <div class="nm">${esc(d.nombre)}</div></div>`).join('')}</div>
+  ${vCumplimiento(id)}
   <h2>💵 Préstamos <span class="cnt">${loans.length}</span></h2>
   <div class="btnrow">
     <button class="btn" data-new-loan="${id}" style="flex:1">+ Nuevo préstamo</button>
@@ -2140,6 +2351,8 @@ service cloud.firestore {
   </div>
 
   <h2>💾 Copia de seguridad</h2>
+  <div class="hint" style="margin:-4px 0 8px">La app guarda sola una copia por día en tu Firebase. Tocá <b>Copias automáticas</b> para verlas o volver a un día anterior.</div>
+  <button class="btn sec" id="bk-auto" style="margin-bottom:10px">🗄 Copias automáticas</button>
   <div class="btnrow">
     <button class="btn sec" id="bk-export">⬇️ Exportar datos</button>
     <button class="btn sec" id="bk-import">⬆️ Importar</button>
@@ -2271,6 +2484,7 @@ function formContratoPrevio(clientId,draftId){
   <label>Cliente *</label>
   <select id="cn-cli">${vClients().slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(c=>
     `<option value="${c.id}" ${c.id===(d?d.clientId:clientId)?'selected':''}>${esc(c.nombre)} (${c.tipo==='comercio'?'comercio':'persona'})</option>`).join('')}</select>
+  <div id="cn-hist"></div>
   <label>Tipo de contrato</label>
   <div class="seg" id="cn-tipo">
     <button data-v="personal" class="${(d?d.contratoTipo:((cl0&&cl0.tipo==='comercio')?'comercial':'personal'))==='personal'?'on':''}">👤 Personal</button>
@@ -2314,6 +2528,8 @@ function formContratoPrevio(clientId,draftId){
       Última cuota: ${dLong(cs[cs.length-1].vence)}${f==='diaria'?` (${skipSun?'sin cobrar':'cobrando'} los domingos)`:''}<br>Ganancia: <b>${fmt$(total-m)}</b>`;
   };
   ['cn-monto','cn-int','cn-n','cn-freq','cn-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
+  {const pintarHist=()=>{const h=$('#cn-hist');if(h)h.innerHTML=resumenCumplimiento($('#cn-cli').value);};
+   $('#cn-cli').addEventListener('change',pintarHist);pintarHist();}
   $('#cn-freq').addEventListener('change',()=>{
     if(!fechaManual){$('#cn-inicio').value=fechaPrimerCobro($('#cn-freq').value);upd();}});
   upd();
@@ -2384,6 +2600,7 @@ function formPrestamo(clientId,preset){
   <label>Cliente *</label>
   <select id="p-cli">${vClients().slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(c=>
     `<option value="${c.id}" ${c.id===clientId?'selected':''}>${esc(c.nombre)} (${c.tipo==='comercio'?'comercio':'persona'})</option>`).join('')}</select>
+  <div id="p-hist"></div>
   <label>Tipo de préstamo</label>
   <div class="seg" id="p-tipo">
     <button data-v="personal" class="on">👤 Personal</button>
@@ -2488,6 +2705,7 @@ function formPrestamo(clientId,preset){
   if(!esSocio()){
     $$('#p-reparto button').forEach(b=>b.addEventListener('click',()=>repartoManual=true));
     const aplicarGestorDelCliente=()=>{
+      const h=$('#p-hist');if(h)h.innerHTML=resumenCumplimiento($('#p-cli').value);
       if(repartoManual)return;
       const cl=client($('#p-cli').value), g=cl&&cl.gestorId;
       const existe=g&&(S.settings.socios||[]).some(s=>s.id===g);
@@ -2499,6 +2717,9 @@ function formPrestamo(clientId,preset){
     };
     $('#p-cli').addEventListener('change',aplicarGestorDelCliente);
     aplicarGestorDelCliente();
+  }else{ // el socio también ve cómo paga el cliente antes de prestarle
+    const pintar=()=>{const h=$('#p-hist');if(h)h.innerHTML=resumenCumplimiento($('#p-cli').value);};
+    $('#p-cli').addEventListener('change',pintar);pintar();
   }
   if(preset){ // valores traídos del simulador
     if(preset.monto!=null)$('#p-monto').value=preset.monto;
@@ -2536,6 +2757,7 @@ function formRenovar(viejoId){
   const inicioDef=fechaPrimerCobro('diaria');
   modal(`<h3>🔄 Renovar préstamo</h3>
   <div class="hint">Cliente: <b>${esc(cl.nombre)}</b> · Saldo pendiente actual: <b>${fmt$(saldo)}</b></div>
+  ${resumenCumplimiento(v.clientId)}
   <div class="frow">
     <div><label>Monto del nuevo préstamo *</label><input id="rv-monto" type="number" inputmode="decimal" placeholder="100000"></div>
     <div><label>Interés % *</label><input id="rv-int" type="number" inputmode="decimal" placeholder="30"></div>
@@ -3476,6 +3698,7 @@ function bindView(){
     $('#sec-change').onclick=formCambiarClave;
     $('#sec-lock').onclick=showLock;
     $('#bk-export').onclick=exportar;
+    {const ba=$('#bk-auto');if(ba)ba.onclick=formCopias;}
     $('#bk-import').onclick=()=>$('#bk-file').click();
     $('#bk-file').onchange=e=>{if(e.target.files[0])importar(e.target.files[0]);};
     $('#wipe').onclick=()=>{
