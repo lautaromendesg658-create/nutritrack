@@ -272,7 +272,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=73; // mantener a la par del número de caché en sw.js
+const APP_VER=74; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -459,20 +459,32 @@ function socioNombre(id){
 function reasignarPrestamosDeCliente(clientId,gestorId){
   const ls=S.loans.filter(l=>l.clientId===clientId&&l.status==='activo');
   ls.forEach(l=>{
-    if(gestorId){l.gestorId=gestorId;l.gestorPct=socioPct(gestorId);l.gestorNombre=socioNombre(gestorId);}
-    else{delete l.gestorId;delete l.gestorPct;delete l.gestorNombre;}
+    if(gestorId){
+      l.gestorId=gestorId;l.gestorPct=socioPct(gestorId);l.gestorNombre=socioNombre(gestorId);
+      // el socio arranca desde acá: lo ya cobrado no entra en su reparto
+      l.gestorBase=loanTotalCobrado(l); l.gestorDesde=Date.now();
+    }
+    else{delete l.gestorId;delete l.gestorPct;delete l.gestorNombre;
+      delete l.gestorBase;delete l.gestorDesde;}
     saveLoan(l);
   });
   return ls.length;
 }
-function loanReparto(l){ // devuelve {socioNom, socioPct, miPct, gananciaTotal, miParte, socioParte, realizada{...}}
+// gestorBase: lo que ya se había cobrado del préstamo cuando se le pasó al socio.
+// El socio participa solo de la ganancia generada DESPUÉS de eso; lo anterior es todo del dueño.
+function gananciaPrevia(l){return Math.max(0,(l.gestorBase||0)-(l.monto||0));}
+function loanReparto(l){ // devuelve {socioNom, socioPct, miPct, gananciaTotal, miParte, socioParte, …}
   const g=loanGananciaProyectada(l), gr=loanGananciaRealizada(l);
   if(!l.gestorId||!l.gestorPct){return {compartido:false, gananciaTotal:g, miParteTotal:g, miParteReal:gr};}
   const sp=Math.max(0,Math.min(100,l.gestorPct)), mp=100-sp;
   const nom=socioNombre(l.gestorId)||l.gestorNombre||'Socio';
-  return {compartido:true, socioNom:nom, socioPct:sp, miPct:mp, gananciaTotal:g,
-    socioParteTotal:Math.round(g*sp/100), miParteTotal:Math.round(g*mp/100),
-    socioParteReal:Math.round(gr*sp/100), miParteReal:Math.round(gr*mp/100)};
+  const previa=gananciaPrevia(l);                       // ganancia ya hecha antes del traspaso
+  const gComp=Math.max(0,g-previa), grComp=Math.max(0,gr-previa); // lo que sí se reparte
+  const socioParteTotal=Math.round(gComp*sp/100), socioParteReal=Math.round(grComp*sp/100);
+  return {compartido:true, socioNom:nom, socioPct:sp, miPct:mp, gananciaTotal:g, previa,
+    desde:l.gestorDesde||0,
+    socioParteTotal, miParteTotal:g-socioParteTotal,
+    socioParteReal, miParteReal:gr-socioParteReal};
 }
 function refreshLoanStatus(l){
   if(l.status==='cancelado'||l.status==='renovado')return;
@@ -1266,6 +1278,7 @@ function vPrestamo(id){
     return `<h2>🤝 Reparto de ganancia</h2>
     <div class="list" style="padding:14px">
       <div class="t2" style="margin-bottom:10px">Ganancia del préstamo: <b style="color:var(--gold)">${fmt$(r.gananciaTotal)}</b><br><span style="font-size:11px">interés + mora y cobrador cobrados</span></div>
+      ${r.desde?`<div class="t2" style="margin-bottom:10px;color:var(--blue)">🤝 ${esc(r.socioNom)} lo tomó el ${dLong(ymd(new Date(r.desde)))}${l.gestorBase>0?` · para entonces ya habías cobrado ${fmt$(l.gestorBase)}`:''}.${r.previa>0?` De la ganancia, <b>${fmt$(r.previa)}</b> ya estaba hecha antes y es toda tuya; se reparte solo lo de acá en adelante.`:' Se reparte la ganancia de este préstamo desde esa fecha.'}</div>`:''}
       ${falta>0?`<div class="t2" style="margin-bottom:10px;color:var(--orange)">🔄 Todavía recuperando el capital prestado (${fmt$(l.monto)}). Faltan cobrar ${fmt$(falta)} para llegar al punto neutro; recién de ahí en más se reparte.</div>`:''}
       <div class="cuota" style="padding:10px 0"><div class="num">YO</div>
         <div class="mid"><div class="t1" style="font-size:14px">Mi parte (${r.miPct}%)</div>
@@ -2732,9 +2745,13 @@ function formReparto(loanId){
     if(compartir){
       const sid=$('#r-socio').value;
       if(!sid||sid==='__nuevo__')return alert('Elegí o agregá el socio que gestiona el préstamo');
+      const cambiaSocio=l.gestorId!==sid;
       l.gestorId=sid; l.gestorPct=Math.max(0,Math.min(100,+$('#r-pct').value||0)); l.gestorNombre=socioNombre(sid);
+      // si recién ahora se comparte (o cambia de socio), participa desde lo que falta cobrar
+      if(cambiaSocio){l.gestorBase=loanTotalCobrado(l); l.gestorDesde=Date.now();}
     }else{
       delete l.gestorId; delete l.gestorPct; delete l.gestorNombre;
+      delete l.gestorBase; delete l.gestorDesde;
     }
     saveLoan(l);closeModal();render();
   };
