@@ -124,6 +124,18 @@
   .b-ven{color:var(--red)}
   .b-fut{color:var(--muted)}
   .b-cob{color:var(--orange)}
+  /* chapa de "cómo paga": rellena, para que salte a la vista en cualquier lista */
+  .badge.niv{border:0;color:var(--onColor);font-weight:800;padding:3px 9px;letter-spacing:.6px}
+  .niv-bueno{background:var(--green)}
+  .niv-regular{background:var(--gold)}
+  .niv-malo{background:var(--red)}
+  .niv-poco{background:var(--blue)}
+  .niv-nuevo{background:var(--muted)}
+  /* franja del veredicto en la ficha del cliente */
+  .veredicto{display:flex;align-items:center;gap:10px;padding:13px 14px;color:var(--onColor);
+    border-radius:10px 10px 0 0;font-weight:800;letter-spacing:.5px}
+  .veredicto .vt{font-size:16px}
+  .veredicto .vs{font-size:12px;font-weight:600;opacity:.9;margin-left:auto;text-align:right;letter-spacing:0}
 
   button{font-family:inherit;cursor:pointer}
   .btn{border:none;border-radius:10px;padding:13px 18px;font-weight:700;font-size:14px;
@@ -297,7 +309,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=77; // mantener a la par del número de caché en sw.js
+const APP_VER=78; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1195,11 +1207,16 @@ function cumplimiento(clientId){
   return R;
 }
 const NIVEL={
-  nuevo:{txt:'SIN HISTORIAL',col:'var(--muted)',ic:'🆕'},
-  poco :{txt:'POCO HISTORIAL',col:'var(--blue)',ic:'🔎'},
-  bueno:{txt:'CONFIABLE',col:'var(--green)',ic:'✅'},
-  regular:{txt:'IRREGULAR',col:'var(--gold)',ic:'⚠️'},
-  malo :{txt:'PROBLEMÁTICO',col:'var(--red)',ic:'🔴'}};
+  nuevo:{txt:'SIN HISTORIAL',col:'var(--muted)',ic:'🆕',cls:'niv-nuevo'},
+  poco :{txt:'POCO HISTORIAL',col:'var(--blue)',ic:'🔎',cls:'niv-poco'},
+  bueno:{txt:'CONFIABLE',col:'var(--green)',ic:'✅',cls:'niv-bueno'},
+  regular:{txt:'IRREGULAR',col:'var(--gold)',ic:'⚠️',cls:'niv-regular'},
+  malo :{txt:'PROBLEMÁTICO',col:'var(--red)',ic:'🔴',cls:'niv-malo'}};
+// chapa de nivel, bien visible, para listas
+function chapaNivel(clientId){
+  const N=NIVEL[cumplimiento(clientId).nivel];
+  return `<span class="badge niv ${N.cls}">${N.ic} ${N.txt}</span>`;
+}
 function tiraHTML(tira,max){
   const t=tira.slice(-(max||20));
   if(!t.length)return '';
@@ -1215,8 +1232,9 @@ function resumenCumplimiento(clientId){
   if(R.abandonadas)datos.push(`<b style="color:var(--red)">${R.abandonadas} sin cobrar</b>`);
   if(R.acuerdos)datos.push(`<b style="color:var(--red)">deuda acordada</b>`);
   if(R.renovados)datos.push(`${R.renovados} renovación${R.renovados===1?'':'es'}`);
-  return `<div class="hint" style="border-left:3px solid ${N.col};padding-left:8px">
-    ${N.ic} <b style="color:${N.col}">${N.txt}</b> · ${datos.join(' · ')}</div>`;
+  return `<div class="hint" style="margin-top:6px">
+    <span class="badge niv ${N.cls}">${N.ic} ${N.txt}</span>
+    <span style="display:block;margin-top:5px">${datos.join(' · ')}</span></div>`;
 }
 function vCumplimiento(clientId){
   const R=cumplimiento(clientId), N=NIVEL[R.nivel];
@@ -1236,10 +1254,14 @@ function vCumplimiento(clientId){
   if(R.neutras)lineas.push(`<span style="color:var(--muted)">${R.neutras} cuota${R.neutras===1?'':'s'} quedaron saldadas por renovación o acuerdo (no cuentan para la puntualidad)</span>`);
   return `
   <h2>📊 Cómo paga este cliente</h2>
-  <div class="list" style="padding:14px;border-left:3px solid ${N.col}">
-    <div class="t1" style="color:${N.col};font-size:16px">${N.ic} ${N.txt}</div>
-    ${sub?`<div class="t2" style="color:${N.col}">${sub}</div>`:''}
-    <div class="t2" style="margin-top:8px">Le prestaste ${R.prestamos} ${R.prestamos===1?'vez':'veces'} · ${fmt$(R.nuevo)} de plata nueva${R.desde?` · desde ${dLong(R.desde)}`:''}</div>
+  <div class="list" style="padding:0">
+    <div class="veredicto" style="background:${N.col}">
+      <span style="font-size:20px">${N.ic}</span>
+      <span class="vt">${N.txt}</span>
+      ${sub?`<span class="vs">${sub}</span>`:''}
+    </div>
+    <div style="padding:14px">
+    <div class="t2">Le prestaste ${R.prestamos} ${R.prestamos===1?'vez':'veces'} · ${fmt$(R.nuevo)} de plata nueva${R.desde?` · desde ${dLong(R.desde)}`:''}</div>
     <div class="t2">Te devolvió ${fmt$(R.cobrado)} · le ganaste <b style="color:var(--green)">${fmt$(R.ganancia)}</b>${R.deudaHoy>0?` · hoy te debe ${fmt$(R.deudaHoy)}`:''}</div>
     <div class="t2" style="margin-top:8px;line-height:1.9">${lineas.join('<br>')}</div>
     ${R.tira.length?`<div class="t2" style="margin-top:10px">Últimas ${Math.min(20,R.tira.length)} cuotas <span style="color:var(--muted)">(la más vieja a la izquierda)</span></div>
@@ -1248,6 +1270,7 @@ function vCumplimiento(clientId){
       <span class="tl ok"></span> en término &nbsp; <span class="tl tarde"></span> tarde &nbsp;
       <span class="tl venc"></span> vencida &nbsp; <span class="tl mala"></span> sin cobrar &nbsp;
       <span class="tl neu"></span> renovación/acuerdo</div>`:''}
+    </div>
   </div>`;
 }
 function vPendientes(){ // contratos armados que todavía no se convirtieron en préstamo
@@ -1410,9 +1433,9 @@ function vClientes(){
     const deuda=clienteDeuda(c.id);
     const R=cumplimiento(c.id), N=NIVEL[R.nivel];
     return `<div class="item" data-cli="${c.id}">
-      <div class="ava ${c.tipo==='comercio'?'shop':''}">${esc(ini(c.nombre))}</div>
-      <div class="mid"><div class="t1">${esc(c.nombre)} <span class="badge ${c.tipo==='comercio'?'b-com':'b-per'}">${c.tipo==='comercio'?'Comercio':'Persona'}</span>${R.nivel!=='nuevo'?` <span title="${N.txt}" style="color:${N.col};font-size:11px">●</span>`:''}</div>
-      <div class="t2">${esc(c.telefono||'sin teléfono')}${act?` · ${act} préstamo${act>1?'s':''} activo${act>1?'s':''}`:''}</div>
+      <div class="ava ${c.tipo==='comercio'?'shop':''}" style="border-color:${N.col};color:${N.col}">${esc(ini(c.nombre))}</div>
+      <div class="mid"><div class="t1">${esc(c.nombre)} ${chapaNivel(c.id)}</div>
+      <div class="t2">${c.tipo==='comercio'?'Comercio':'Persona'} · ${esc(c.telefono||'sin teléfono')}${act?` · ${act} préstamo${act>1?'s':''} activo${act>1?'s':''}`:''}</div>
       ${conFiltro&&cliGestor==='todos'&&c.gestorId&&socioNombre(c.gestorId)?`<div class="t2">🤝 ${esc(socioNombre(c.gestorId))}</div>`:''}</div>
       <div class="end">${deuda>0?`<div class="m1">${fmt$(deuda)}</div><div class="m2">debe</div>`:'<div class="m2">sin deuda</div>'}</div>
     </div>`;}).join(''):`<div class="empty">${q?'Ningún cliente coincide con la búsqueda.'
@@ -1489,7 +1512,7 @@ function rowLoan(l){
     :late?'<span class="badge b-ven">Atrasado</span>':'<span class="badge b-hoy">Activo</span>';
   return `<div class="item loanrow" data-loan="${l.id}">
     <div class="ava ${l.tipo==='comercial'?'shop':''}">${esc(ini(cl.nombre))}</div>
-    <div class="mid"><div class="t1">${esc(cl.nombre)} ${badge}</div>
+    <div class="mid"><div class="t1">${esc(cl.nombre)} ${badge} ${chapaNivel(l.clientId)}</div>
       <div class="t2">${l.tipo==='comercial'?'Comercial':'Personal'} · ${FREQ[l.frecuencia]} · ${l.cuotas.length} cuotas
       ${next?' · próx. '+dShort(next.vence):''}</div>
       ${l.acuerdo?`<div class="t2" style="color:var(--blue)">🤝 Deuda acordada en ${fmt$(l.acuerdo.monto)} · sin mora</div>`:''}
