@@ -34,6 +34,9 @@
   body{padding:env(safe-area-inset-top) 0 0 0;min-height:100vh}
   .wrap{padding:16px 16px 120px;max-width:980px;margin:0 auto}
   @media(min-width:700px){.wrap{padding-top:24px}}
+  /* en pantallas grandes aprovechamos el ancho real en vez de dejar los costados vacíos */
+  @media(min-width:1100px){.wrap{max-width:1280px;padding-left:28px;padding-right:28px}}
+  @media(min-width:1500px){.wrap{max-width:1440px;padding-left:36px;padding-right:36px}}
 
   header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:10px}
   h1{font-family:var(--serif);font-size:27px;font-weight:600;color:var(--txt);letter-spacing:-.2px;line-height:1.15}
@@ -145,8 +148,11 @@
      se aprovecha el costado y se baja menos con el dedo */
   .cols>div:empty{display:none}
   @media(min-width:900px){
-    .cols{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;align-items:start}
+    .cols{display:grid;grid-template-columns:1fr 1fr;gap:0 26px;align-items:start}
+      .cols.una{grid-template-columns:1fr}   /* si solo hay una, usa todo el ancho */
     .cols>div>h2:first-child{margin-top:14px}
+    /* los formularios no se estiran de punta a punta: se leen mejor angostos */
+    .angosto{max-width:780px}
   }
 
   button{font-family:inherit;cursor:pointer}
@@ -207,6 +213,8 @@
   .cday{aspect-ratio:.92;background:var(--panel);border:1px solid var(--line);border-radius:11px;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:13px;
     font-weight:600;cursor:pointer;position:relative;min-width:0}
+  /* en pantallas anchas el mes entra completo: celdas más bajas en vez de cuadrados enormes */
+  @media(min-width:900px){.cday{aspect-ratio:auto;height:96px}}
   .cday.off{opacity:.28}
   .cday.today{border-color:var(--gold);color:var(--gold)}
   .cday.sel{background:var(--panel-2);border-color:var(--gold)}
@@ -218,6 +226,7 @@
 
   /* docs */
   .docgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
+  @media(min-width:900px){.docgrid{grid-template-columns:repeat(6,1fr)}}
   .doc{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;overflow:hidden;
     aspect-ratio:1;position:relative;cursor:pointer}
   .doc img{width:100%;height:100%;object-fit:cover}
@@ -321,7 +330,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=79; // mantener a la par del número de caché en sw.js
+const APP_VER=80; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1397,6 +1406,12 @@ function vInicio(){
     ${Object.entries(porSocio).map(([nom,v])=>repRow('s:'+nom,ini(nom),'shop',nom,v.real,v.total,'var(--blue)',v.loans)).join('')}
   </div>`:'';
 
+  // Dos columnas en pantallas anchas: a la izquierda la plata (liquidaciones + lo ganado),
+  // a la derecha el reparto. Si una de las dos no tiene nada, la otra usa todo el ancho.
+  const colIzq=vLiquidaciones()+vGanado(), colDer=repartoHTML;
+  const colsHTML=(colIzq||colDer)?`<div class="cols${colIzq&&colDer?'':' una'}">${
+    colIzq?`<div>${colIzq}</div>`:''}${colDer?`<div>${colDer}</div>`:''}</div>`:'';
+
   return `
   <div class="stats">
     <div class="stat blue"><div class="lbl">Clientes</div><div class="val">${vClients().length}</div></div>
@@ -1416,13 +1431,10 @@ function vInicio(){
     <button class="btn sec" id="sim-btn" style="flex:1">🧮 Simulador</button>
     <button class="btn sec" id="cn-btn" style="flex:1">📄 Nuevo contrato</button>
   </div>
-  ${vPendientes()}
-  <div class="cols">
-    <div>${vLiquidaciones()}</div>
-    <div>${vGanado()}${repartoHTML}</div>
-  </div>
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(x=>filaCobranza(x)).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
+  ${vPendientes()}
+  ${colsHTML}
   <h2>🔴 Vencidos por cliente <span class="cnt">${agruparPorCliente(venc).length}</span></h2>
   ${venc.length?`<div class="chips">
     ${[['atraso','⏳ Más atrasado'],['reciente','🆕 Reciente'],['monto','💵 Mayor monto'],['cliente','🔤 A-Z cliente']].map(([k,t])=>
@@ -2345,8 +2357,8 @@ function vMiCuenta(){ // pantalla reducida para un socio: sin ajustes del negoci
 }
 function vAjustes(){
   const st=S.settings,fb=fbCfg();
-  if(esSocio())return vMiCuenta();
-  return `
+  if(esSocio())return `<div class="angosto">${vMiCuenta()}</div>`;
+  return `<div class="angosto">
   <h2>🎨 Apariencia</h2>
   <div class="list" style="padding:4px 14px 16px">
     <label>Tema</label>
@@ -2482,7 +2494,8 @@ service cloud.firestore {
   <h2>⚠️ Zona de peligro</h2>
   <button class="btn red" id="wipe">Borrar todos los datos de este dispositivo</button>
   <button class="btn sec" id="buscar-upd" style="margin-top:14px">🔁 Buscar actualización</button>
-  <div class="hint" style="text-align:center;margin-top:18px">PrestaControl · versión ${APP_VER} · hecho a medida ✨</div>`;
+  <div class="hint" style="text-align:center;margin-top:18px">PrestaControl · versión ${APP_VER} · hecho a medida ✨</div>
+  </div>`;
 }
 
 /* ================= FORMULARIOS / MODALES ================= */
