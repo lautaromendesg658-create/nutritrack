@@ -136,6 +136,18 @@
     border-radius:10px 10px 0 0;font-weight:800;letter-spacing:.5px}
   .veredicto .vt{font-size:16px}
   .veredicto .vs{font-size:12px;font-weight:600;opacity:.9;margin-left:auto;text-align:right;letter-spacing:0}
+  /* casilla de la papelera: reemplaza al ícono, con área grande para el dedo */
+  .pchk{display:flex;align-items:center;gap:8px;flex-shrink:0;cursor:pointer;padding:4px 2px}
+  .pchk input{width:20px;height:20px;accent-color:var(--red);flex-shrink:0;margin:0}
+  .pchk span{font-size:18px}
+  .btn[disabled]{opacity:.45;pointer-events:none}
+  /* en pantallas anchas, liquidaciones a la izquierda y ganancias a la derecha:
+     se aprovecha el costado y se baja menos con el dedo */
+  .cols>div:empty{display:none}
+  @media(min-width:900px){
+    .cols{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;align-items:start}
+    .cols>div>h2:first-child{margin-top:14px}
+  }
 
   button{font-family:inherit;cursor:pointer}
   .btn{border:none;border-radius:10px;padding:13px 18px;font-weight:700;font-size:14px;
@@ -309,7 +321,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=78; // mantener a la par del número de caché en sw.js
+const APP_VER=79; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -611,15 +623,39 @@ async function borrarDefinitivo(id){
   const tipo=e.kind==='client'?'el cliente':e.kind==='loan'?'el préstamo':e.kind==='draft'?'el contrato':'el documento';
   if(!confirm(`¿Borrar DEFINITIVAMENTE ${tipo} "${e.nombre}"?\n\nEsto NO se puede deshacer: se elimina también de la nube y de todos los dispositivos.\n\nSi tenés dudas, dejalo en la papelera: no molesta ni afecta ninguna cuenta.`))return;
   if((prompt('Escribí BORRAR para confirmar:')||'').trim().toUpperCase()!=='BORRAR')return;
-  S.trash=(S.trash||[]).filter(x=>x.id!==id);
-  S.settings.purgados=[...purgados().filter(x=>x!==id),id].slice(-500);
+  const r=await purgarIds([id]);
+  render();
+  alert(r.nube?'Borrado definitivamente ✅':'Borrado de la lista ✅\nNo se pudo alcanzar la nube ahora mismo; se termina de limpiar cuando vuelva la conexión.');
+}
+// borra de verdad: saca de la papelera, anota el purgado para todos los dispositivos y limpia la nube
+async function purgarIds(ids){
+  const items=(S.trash||[]).filter(x=>ids.includes(x.id));
+  if(!items.length)return {n:0,nube:true};
+  S.trash=(S.trash||[]).filter(x=>!ids.includes(x.id));
+  S.settings.purgados=[...purgados().filter(x=>!ids.includes(x)),...ids].slice(-500);
   saveSettings(); // persiste y avisa a los otros dispositivos
-  if(e.kind==='doc')idbDel(id);
+  items.forEach(x=>{if(x.kind==='doc')idbDel(x.id);});
   let nube=true;
-  if(FB.base){try{await FB.base.collection('items').doc(id).delete();}catch(err){console.error(err);nube=false;}}
-  else nube=false;
-  persist();render();
-  alert(nube?'Borrado definitivamente ✅':'Borrado de la lista ✅\nNo se pudo alcanzar la nube ahora mismo; se termina de limpiar cuando vuelva la conexión.');
+  if(FB.base){
+    for(const id of ids){
+      try{await FB.base.collection('items').doc(id).delete();}
+      catch(err){console.error(err);nube=false;}
+    }
+  }else nube=false;
+  persist();
+  return {n:items.length,nube};
+}
+async function borrarSeleccionados(){
+  if(esSocio())return alert('Solo el dueño puede borrar de forma definitiva.');
+  const ids=[...papSel].filter(id=>(S.trash||[]).some(x=>x.id===id));
+  if(!ids.length)return alert('No hay nada tildado.');
+  const lista=(S.trash||[]).filter(x=>ids.includes(x.id)).slice(0,8).map(x=>'· '+(x.nombre||'(sin nombre)')).join('\n');
+  if(!confirm(`¿Borrar DEFINITIVAMENTE ${ids.length} elemento(s) de la papelera?\n\n${lista}${ids.length>8?`\n· …y ${ids.length-8} más`:''}\n\nEsto NO se puede deshacer: se eliminan también de la nube y de todos los dispositivos.`))return;
+  if((prompt('Escribí BORRAR para confirmar:')||'').trim().toUpperCase()!=='BORRAR')return;
+  const r=await purgarIds(ids);
+  papSel.clear(); render();
+  alert(r.nube?`Listo ✅\nSe borraron ${r.n} elemento(s) definitivamente.`
+    :`Se borraron ${r.n} de la lista ✅\nNo se pudo alcanzar la nube ahora mismo; se termina de limpiar cuando vuelva la conexión.`);
 }
 async function traerDataDeDoc(id){ // la imagen del documento borrado vive en la nube
   if(!FB.base)return null;
@@ -1380,10 +1416,11 @@ function vInicio(){
     <button class="btn sec" id="sim-btn" style="flex:1">🧮 Simulador</button>
     <button class="btn sec" id="cn-btn" style="flex:1">📄 Nuevo contrato</button>
   </div>
-  ${vLiquidaciones()}
-  ${vGanado()}
   ${vPendientes()}
-  ${repartoHTML}
+  <div class="cols">
+    <div>${vLiquidaciones()}</div>
+    <div>${vGanado()}${repartoHTML}</div>
+  </div>
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(x=>filaCobranza(x)).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
   <h2>🔴 Vencidos por cliente <span class="cnt">${agruparPorCliente(venc).length}</span></h2>
@@ -2250,18 +2287,27 @@ function vCalendario(){
 }
 
 /* ================= VISTA: AJUSTES ================= */
+let papSel=new Set(); // ids tildados en la papelera
 function vPapelera(){
   const t=vTrash();
-  const ico={client:'👤',loan:'💵',doc:'📄'}, nom={client:'Cliente',loan:'Préstamo',doc:'Documento'};
+  const ico={client:'👤',loan:'💵',doc:'📄',draft:'📄'}, nom={client:'Cliente',loan:'Préstamo',doc:'Documento',draft:'Contrato'};
+  const vis=t.slice(0,60);
+  papSel=new Set([...papSel].filter(id=>t.some(x=>x.id===id))); // limpiar lo que ya no está
+  const nSel=papSel.size, todos=vis.length>0&&vis.every(x=>papSel.has(x.id));
   return `
   <h2>🗑 Papelera <span class="cnt">${t.length}</span></h2>
   <div class="list" style="padding:4px 14px 16px">
-    <div class="hint" style="margin-top:10px">Nada se borra del todo: lo eliminado queda acá${esSocio()?'':' (también lo que borre un socio desde su cuenta)'} y se puede restaurar con todo su historial de pagos. Se guarda por un año.${esSocio()?'':' Si querés sacar algo de acá para siempre, usá <b>🔥 borrar definitivamente</b>: eso sí es irreversible.'}</div>
-    ${t.length?t.slice(0,60).map(x=>`<div class="item" style="cursor:default;padding-left:0;padding-right:0">
-      <div class="ava">${ico[x.kind]||'🗑'}</div>
+    <div class="hint" style="margin-top:10px">Nada se borra del todo: lo eliminado queda acá${esSocio()?'':' (también lo que borre un socio desde su cuenta)'} y se puede restaurar con todo su historial de pagos. Se guarda por un año.${esSocio()?'':' Si querés sacar algo de acá para siempre, tildalo y usá <b>🔥 Borrar los tildados</b>: eso sí es irreversible.'}</div>
+    ${(!esSocio()&&vis.length)?`<div class="btnrow" style="margin-bottom:6px">
+      <button class="btn sec mini" id="pap-todos" style="flex:0 0 auto">${todos?'☑️ Quitar la selección':'⬜ Seleccionar todo'}</button>
+      <button class="btn red mini" id="pap-borrar" style="flex:0 0 auto" ${nSel?'':'disabled'}>🔥 Borrar ${nSel?'los '+nSel+' tildados':'los tildados'}</button>
+    </div>`:''}
+    ${vis.length?vis.map(x=>`<div class="item" style="cursor:default;padding-left:0;padding-right:0">
+      ${esSocio()?`<div class="ava">${ico[x.kind]||'🗑'}</div>`
+        :`<label class="pchk"><input type="checkbox" data-papsel="${x.id}" ${papSel.has(x.id)?'checked':''}><span>${ico[x.kind]||'🗑'}</span></label>`}
       <div class="mid"><div class="t1">${esc(x.nombre||'(sin nombre)')}</div>
         <div class="t2">${nom[x.kind]||''} · eliminado el ${dLong(ymd(new Date(x.t)))}${x.por?' por '+esc(x.por):''}</div>
-        ${esSocio()?'':`<div class="t2" style="margin-top:5px"><span class="undo" data-purgar="${x.id}">🔥 borrar definitivamente</span></div>`}</div>
+        ${esSocio()?'':`<div class="t2" style="margin-top:5px"><span class="undo" data-purgar="${x.id}">🔥 borrar solo este</span></div>`}</div>
       <button class="btn sec mini" data-restaurar="${x.id}">↩️ Restaurar</button>
     </div>`).join(''):'<div class="empty" style="padding:18px">La papelera está vacía</div>'}
     ${t.length>60?`<div class="hint">Se muestran los 60 más recientes de ${t.length}.</div>`:''}
@@ -3643,6 +3689,14 @@ function bindView(){
   $$('[data-liqpagar]').forEach(b=>b.onclick=e=>{e.stopPropagation();marcarPagadoSocio(b.dataset.liqpagar);});
   $$('[data-liqundo]').forEach(b=>b.onclick=e=>{e.stopPropagation();marcarPagadoSocio(b.dataset.liqundo,true);});
   $$('[data-purgar]').forEach(b=>b.onclick=()=>borrarDefinitivo(b.dataset.purgar));
+  $$('[data-papsel]').forEach(b=>b.onchange=()=>{
+    b.checked?papSel.add(b.dataset.papsel):papSel.delete(b.dataset.papsel);render();});
+  {const b=$('#pap-todos');if(b)b.onclick=()=>{
+    const vis=vTrash().slice(0,60);
+    const todos=vis.length>0&&vis.every(x=>papSel.has(x.id));
+    if(todos)papSel.clear(); else vis.forEach(x=>papSel.add(x.id));
+    render();};}
+  {const b=$('#pap-borrar');if(b)b.onclick=()=>borrarSeleccionados();}
   $$('[data-vercontrato]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.vercontrato);if(d)generarContrato(d);});
   $$('[data-tyc-draft]').forEach(b=>b.onclick=()=>{const d=draft(b.dataset.tycDraft);if(d)enviarTyC(d);});
   $$('[data-editcontrato]').forEach(b=>b.onclick=()=>formContratoPrevio(null,b.dataset.editcontrato));
