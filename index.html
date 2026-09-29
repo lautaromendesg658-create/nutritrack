@@ -331,7 +331,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=81; // mantener a la par del número de caché en sw.js
+const APP_VER=82; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -982,7 +982,7 @@ aplicarTema();
 setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
 
 /* ================= NAVEGACIÓN ================= */
-let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), vencSort='atraso';
+let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), cuotaOpen=new Set(), vencSort='atraso';
 $$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
 $('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
 $('#hd-tema').onclick=()=>cambiarTema(temaActual()==='claro'?'oscuro':'claro');
@@ -1799,21 +1799,38 @@ function vPrestamo(id){
       :est==='vencida'?`<span class="badge b-ven">${diasAtraso(c)}d mora</span>${cob>0?'<span class="badge b-cob">cobrador</span>':''}`
       :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>')
       +(parcial&&!esRenov?'<span class="badge b-cob">parcial</span>':'');
-    const pagosTxt=(c.pagos||[]).map(p=>fmt$((p.monto||0)+(p.mora||0)+(p.cobrador||0))+' el '+new Date(p.t).toLocaleDateString('es-AR',{day:'numeric',month:'short'})
-      +(p.renov?' <span style="color:var(--gold)">🔄 saldado con la renovación</span>':'')
-      +(p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` <span class="clip" data-doc="${p.comprobante}">📎 comprobante</span>`:'')
-      +(esRenov?'':` <span class="undo" data-undo="${l.id}|${c.n}|${p.t}" title="deshacer este cobro">✕</span>`)).join(', ');
-    return `<div class="cuota ${cls}">
+    // el detalle día por día se despliega tocando la cuota: así la fila queda corta
+    // aunque el cliente la haya pagado en cinco veces
+    const pagos=(c.pagos||[]).slice().sort((a,b)=>(a.t||0)-(b.t||0));
+    const key=l.id+'|'+c.n, abierta=cuotaOpen.has(key);
+    const extras=cMoraPagada(c)+cCobradorPagado(c);
+    return `<div class="cuota ${cls}" ${pagos.length?`data-cq="${key}" style="cursor:pointer"`:''}>
       <div class="num">${c.n}</div>
       <div class="mid" style="flex:1;min-width:0">
         <div class="t1" style="font-size:14px">${dLong(c.vence)} ${badge}</div>
-        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${parcial&&!esRenov?`<br><span style="color:var(--orange)">De la cuota pagó ${fmt$(cPagadoBase(c))} · restan ${fmt$(rest)}</span>`:''}${(c.pagos||[]).length?`<br>💰 Te pagó <b>${fmt$(cTotalRecibido(c))}</b>${cTotalRecibido(c)!==cPagadoBase(c)?` <span style="color:var(--muted)">(${fmt$(cMoraPagada(c)+cCobradorPagado(c))} fue a mora/cobrador)</span>`:''}: ${pagosTxt}`:''}</div>
+        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${parcial&&!esRenov?`<br><span style="color:var(--orange)">De la cuota pagó ${fmt$(cPagadoBase(c))} · restan ${fmt$(rest)}</span>`:''}${pagos.length?`<br>💰 Te pagó <b>${fmt$(cTotalRecibido(c))}</b> en ${pagos.length} ${pagos.length===1?'pago':'pagos'}${extras?` <span style="color:var(--muted)">(${fmt$(extras)} fue a mora/cobrador)</span>`:''}
+        <span class="chev" style="color:var(--gold)">${abierta?'▾ ocultar el detalle':'▸ ver qué pagó cada día'}</span>`:''}</div>
       </div>
       ${esRenov?'':`<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
         <button class="btn sec mini" data-fecha="${l.id}|${c.n}" title="Cambiar fecha">📅</button>
         ${rest>0?`<button class="btn green mini" data-cobrar="${l.id}|${c.n}">Cobrar</button>`:''}
       </div>`}
-    </div>`;}).join('')}</div>
+    </div>${(abierta&&pagos.length)?`<div class="repbox">${(()=>{let acum=0;
+      return pagos.map(p=>{
+        const aCuota=p.monto||0, mo=p.mora||0, co=p.cobrador||0, tot=aCuota+mo+co;
+        acum+=aCuota; const queda=Math.max(0,c.monto-acum);
+        const partes=[`${fmt$(aCuota)} a la cuota`];
+        if(mo)partes.push(`${fmt$(mo)} de mora`);
+        if(co)partes.push(`${fmt$(co)} de cobrador`);
+        return `<div class="repsub" style="cursor:default">
+          <div class="mid">
+            <div class="t1" style="font-size:14px">${dLong(ymd(new Date(p.t)))}${p.renov?' <span class="badge b-com">🔄 renovación</span>':''}</div>
+            <div class="t2">${partes.join(' · ')}${queda>0?` · <span style="color:var(--orange)">quedó debiendo ${fmt$(queda)}</span>`:' · <span style="color:var(--green)">cuota saldada</span>'}</div>
+            ${p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?`<div class="t2"><span class="clip" data-doc="${p.comprobante}">📎 ver comprobante</span></div>`:''}
+          </div>
+          <div class="end"><div class="m1" style="color:var(--green)">${fmt$(tot)}</div>
+            ${esRenov?'':`<div style="margin-top:4px"><span class="undo" data-undo="${l.id}|${c.n}|${p.t}" title="deshacer este cobro">✕ deshacer</span></div>`}</div>
+        </div>`;}).join('');})()}</div>`:''}`;}).join('')}</div>
   <div class="btnrow">
     <button class="btn" data-contrato="${id}" style="background:var(--blue);color:#fff">📄 Generar contrato</button>
     <button class="btn" data-tyc="${id}" style="background:#25D366;color:#fff">📲 Enviar T&C</button>
@@ -3904,7 +3921,9 @@ function bindView(){
     const l=loan(b.dataset.cancelLoan);if(!l)return;
     if(!confirm('¿Marcar el préstamo como cancelado? Dejará de aparecer en cobros y vencidos.'))return;
     l.status='cancelado';touch(l);persist();fbPush('loan',l);render();});
-  $$('[data-doc]').forEach(b=>b.onclick=()=>verDoc(b.dataset.doc));
+  $$('[data-doc]').forEach(b=>b.onclick=e=>{e.stopPropagation();verDoc(b.dataset.doc);});
+  $$('[data-cq]').forEach(b=>b.onclick=()=>{const k=b.dataset.cq;
+    cuotaOpen.has(k)?cuotaOpen.delete(k):cuotaOpen.add(k);render();});
 
   const cq=$('#cliq');if(cq){cq.oninput=()=>{cliQ=cq.value;
     const list=cq.closest('#view');render();const nq=$('#cliq');nq.focus();nq.setSelectionRange(nq.value.length,nq.value.length);};}
