@@ -80,6 +80,7 @@
   .item .t2{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* filas de acciones: se acomodan en varias líneas en vez de cortarse con "…" */
   .item .t2.acts{white-space:normal;overflow:visible;text-overflow:clip;line-height:2}
+  .item .t2.libre{white-space:normal;overflow:visible;text-overflow:clip} /* líneas que no se pueden cortar */
   /* en pantallas angostas los montos del préstamo bajan a una 2da línea para no cortar nada */
   @media(max-width:620px){
     .item.loanrow{flex-wrap:wrap}
@@ -330,7 +331,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=80; // mantener a la par del número de caché en sw.js
+const APP_VER=81; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -505,6 +506,49 @@ function loanGananciaRealizada(l){ // recién es ganancia lo que se cobra por en
 }
 function loanFaltaParaNeutro(l){ // cuánto falta cobrar de este préstamo para recuperar el capital
   return Math.max(0, (l.monto||0)-loanTotalCobrado(l));
+}
+/* ----- cuánto pagó al día de hoy -----
+   Compara lo que entró con lo que tendría que haber entrado a la fecha.
+   "Esperado" son solo las cuotas ya vencidas (sin mora ni cobrador): así el atraso
+   es plata de cuotas y no se mezcla con los cargos. La mora y el cobrador cobrados
+   se cuentan aparte, porque también son plata que el cliente puso. */
+function pagoAlDia(l){
+  const t=todayStr(), activo=l.status==='activo';
+  const cuotas=(l.total||0)-loanRestante(l);        // lo aplicado a cuotas
+  const extras=loanExtrasCobrados(l);               // mora + cobrador cobrados
+  const esperado=activo?l.cuotas.reduce((a,c)=>a+(c.vence<=t?c.monto:0),0):cuotas;
+  let ultimo=0;
+  l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{if(!p.renov&&p.t>ultimo)ultimo=p.t;}));
+  return {cuotas,extras,total:cuotas+extras,esperado,
+    atraso:activo?Math.max(0,esperado-cuotas):0,
+    adelanto:activo?Math.max(0,cuotas-esperado):0,
+    restante:l.status==='renovado'?0:loanRestante(l),
+    pct:l.total?Math.min(100,Math.round(cuotas*100/l.total)):0,
+    ultimo};
+}
+// lo mismo pero juntando todos los préstamos de un cliente
+function paneoCliente(clientId,modo){
+  const ls=vLoans().filter(l=>l.clientId===clientId&&(modo==='todos'||l.status==='activo'));
+  const R={loans:ls.length,activos:0,prestado:0,aDevolver:0,cuotas:0,extras:0,
+    esperado:0,atraso:0,adelanto:0,restante:0,ultimo:0};
+  ls.forEach(l=>{const p=pagoAlDia(l);
+    R.prestado+=l.monto||0; R.aDevolver+=l.total||0;
+    R.cuotas+=p.cuotas; R.extras+=p.extras; R.esperado+=p.esperado;
+    R.atraso+=p.atraso; R.restante+=p.restante;
+    if(l.status==='activo')R.activos++;
+    if(p.ultimo>R.ultimo)R.ultimo=p.ultimo;});
+  R.total=R.cuotas+R.extras;
+  R.adelanto=Math.max(0,R.cuotas-R.esperado);
+  R.pct=R.aDevolver?Math.min(100,Math.round(R.cuotas*100/R.aDevolver)):0;
+  R.cumple=R.esperado?Math.min(100,Math.round(R.cuotas*100/R.esperado)):(R.loans?100:0);
+  R.dias=R.ultimo?Math.round((pd(todayStr()).getTime()-pd(ymd(new Date(R.ultimo))).getTime())/DAY):null;
+  return R;
+}
+function hace(dias){
+  if(dias==null)return 'nunca pagó nada';
+  if(dias<=0)return 'pagó hoy';
+  if(dias===1)return 'pagó ayer';
+  return 'último pago hace '+dias+' días';
 }
 function socioPct(id){const s=(S.settings.socios||[]).find(x=>x.id===id);return s&&s.pct!=null?s.pct:50;}
 function socioNombre(id){
@@ -945,10 +989,12 @@ $('#hd-tema').onclick=()=>cambiarTema(temaActual()==='claro'?'oscuro':'claro');
 $('#hd-nuevo').onclick=()=>{if(vClients().length)formPrestamo();else{alert('Primero cargá un cliente.');go('clientes');}};
 function go(v,detail){VIEW=v;DETAIL=detail||null;render();}
 function render(){
-  $$('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v===VIEW));
+  const tab=VIEW==='paneo'?'clientes':VIEW; // el paneo vive dentro de Clientes
+  $$('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v===tab));
   $('#fab').style.display=(VIEW==='clientes'||VIEW==='prestamos')&&!DETAIL?'block':'none';
   const v=$('#view');
-  if(VIEW==='inicio')v.innerHTML=vInicio();
+  if(VIEW==='paneo')v.innerHTML=vPaneo();
+  else if(VIEW==='inicio')v.innerHTML=vInicio();
   else if(VIEW==='clientes')v.innerHTML=DETAIL?vCliente(DETAIL):vClientes();
   else if(VIEW==='prestamos')v.innerHTML=DETAIL?vPrestamo(DETAIL):vPrestamos();
   else if(VIEW==='calendario')v.innerHTML=vCalendario();
@@ -1430,6 +1476,7 @@ function vInicio(){
   <div class="btnrow" style="margin-top:8px">
     <button class="btn sec" id="sim-btn" style="flex:1">🧮 Simulador</button>
     <button class="btn sec" id="cn-btn" style="flex:1">📄 Nuevo contrato</button>
+    <button class="btn sec" id="paneo-btn" style="flex:1">📊 Cómo venimos</button>
   </div>
   <h2>📌 Cobros de hoy <span class="cnt">${hoy.length}</span></h2>
   <div class="list">${hoy.length?hoy.map(x=>filaCobranza(x)).join(''):'<div class="empty">No hay cobros programados para hoy</div>'}</div>
@@ -1456,6 +1503,67 @@ function ini(n){return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join
 
 /* ================= VISTA: CLIENTES ================= */
 function clienteDeuda(id){return vLoans().filter(l=>l.clientId===id&&l.status==='activo').reduce((a,l)=>a+loanRestante(l),0);}
+/* ================= VISTA: PANEO DE PAGOS =================
+   Un vistazo de cuánto pagó cada cliente al día de hoy y cuánto tendría que
+   haber pagado a esta altura. */
+let paneoSort='atraso', paneoModo='activos';
+function vPaneo(){
+  const filas=vClients().map(c=>({c,R:paneoCliente(c.id,paneoModo)})).filter(x=>x.R.loans>0);
+  const T=filas.reduce((a,x)=>({prestado:a.prestado+x.R.prestado,aDevolver:a.aDevolver+x.R.aDevolver,
+    cuotas:a.cuotas+x.R.cuotas,extras:a.extras+x.R.extras,esperado:a.esperado+x.R.esperado,
+    atraso:a.atraso+x.R.atraso,restante:a.restante+x.R.restante}),
+    {prestado:0,aDevolver:0,cuotas:0,extras:0,esperado:0,atraso:0,restante:0});
+  const cumple=T.esperado?Math.min(100,Math.round(T.cuotas*100/T.esperado)):100;
+  const atrasados=filas.filter(x=>x.R.atraso>0).length;
+  const orden={
+    atraso:(a,b)=>b.R.atraso-a.R.atraso||b.R.restante-a.R.restante,
+    pago:(a,b)=>b.R.total-a.R.total,
+    quieto:(a,b)=>(b.R.dias==null?1e9:b.R.dias)-(a.R.dias==null?1e9:a.R.dias),
+    avance:(a,b)=>a.R.pct-b.R.pct,
+    az:(a,b)=>a.c.nombre.localeCompare(b.c.nombre)};
+  filas.sort(orden[paneoSort]||orden.atraso);
+  return `
+  <button class="back" data-go="inicio">← Inicio</button>
+  <h2>📊 Cómo venimos <span class="cnt">${filas.length} cliente${filas.length===1?'':'s'}</span></h2>
+  <div class="chips">
+    <button class="${paneoModo==='activos'?'on':''}" data-pm="activos">🟢 Préstamos activos</button>
+    <button class="${paneoModo==='todos'?'on':''}" data-pm="todos">📚 Todo el historial</button>
+  </div>
+  <div class="list" style="padding:14px;margin-bottom:12px">
+    <div class="t2">${paneoModo==='activos'?'Cobrado de los préstamos en curso, al día de hoy:':'Cobrado de todos los préstamos, desde siempre:'}</div>
+    <div style="font-size:26px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;margin:6px 0 2px">${fmt$(T.cuotas+T.extras)}</div>
+    <div class="t2">${fmt$(T.cuotas)} de cuotas${T.extras?` + <b style="color:var(--orange)">${fmt$(T.extras)}</b> de mora y cobrador`:''}</div>
+    ${paneoModo==='activos'?`
+    <div class="progress" style="margin-top:10px"><i style="width:${cumple}%;background:${cumple>=95?'var(--green)':cumple>=75?'var(--gold)':'var(--red)'}"></i></div>
+    <div class="t2" style="margin-top:6px">A esta altura tendrían que haber pagado <b>${fmt$(T.esperado)}</b> · vienen al <b style="color:${cumple>=95?'var(--green)':cumple>=75?'var(--gold)':'var(--red)'}">${cumple}%</b></div>
+    ${T.atraso>0
+      ?`<div class="t2" style="color:var(--red);font-weight:700;margin-top:4px">🔴 Falta cobrar ${fmt$(T.atraso)} de cuotas ya vencidas · ${atrasados} cliente${atrasados===1?'':'s'} atrasado${atrasados===1?'':'s'}</div>`
+      :'<div class="t2" style="color:var(--green);font-weight:700;margin-top:4px">✅ Están todos al día 🎉</div>'}
+    <div class="t2" style="margin-top:6px;color:var(--muted)">Prestado en la calle ${fmt$(T.prestado)} · queda por cobrar ${fmt$(T.restante)}</div>`
+    :`<div class="t2" style="margin-top:6px;color:var(--muted)">Plata prestada ${fmt$(T.prestado)} · quedó sin cobrar ${fmt$(T.restante)}</div>`}
+  </div>
+  <div class="chips">
+    ${[['atraso','🔴 Más atrasado'],['pago','💵 Más pagó'],['quieto','🕰 Hace más que no paga'],
+       ['avance','⏳ Menos avanzado'],['az','🔤 A-Z']].map(([k,t])=>
+      `<button class="${paneoSort===k?'on':''}" data-ps="${k}">${t}</button>`).join('')}
+  </div>
+  <div class="list">${filas.length?filas.map(({c,R})=>{
+    const N=NIVEL[cumplimiento(c.id).nivel];
+    const col=R.atraso>0?'var(--red)':R.adelanto>0?'var(--blue)':'var(--green)';
+    return `<div class="item" data-cli="${c.id}">
+      <div class="ava ${c.tipo==='comercio'?'shop':''}" style="border-color:${N.col};color:${N.col}">${esc(ini(c.nombre))}</div>
+      <div class="mid"><div class="t1">${esc(c.nombre)} ${chapaNivel(c.id)}</div>
+        <div class="t2 libre">Pagó <b style="color:var(--green)">${fmt$(R.total)}</b> de ${fmt$(R.aDevolver)}${R.extras?` · incluye ${fmt$(R.extras)} de mora y cobrador`:''}</div>
+        ${R.activos?`<div class="t2 libre" style="color:${col};font-weight:700">${
+          R.atraso>0?`🔴 Atraso de ${fmt$(R.atraso)} · a esta altura tendría que haber pagado ${fmt$(R.esperado)}`
+          :R.adelanto>0?`🔵 Adelanto de ${fmt$(R.adelanto)}`:'✅ Al día'}</div>`:''}
+        <div class="t2 libre" style="color:var(--muted)">${R.activos?`${R.activos} préstamo${R.activos===1?'':'s'} activo${R.activos===1?'':'s'}`:`${R.loans} préstamo${R.loans===1?'':'s'} terminado${R.loans===1?'':'s'}`} · ${hace(R.dias)}</div>
+        <div class="progress"><i style="width:${R.pct}%;background:${col}"></i></div></div>
+      <div class="end"><div class="m1" style="color:var(--green)">${fmt$(R.total)}</div>
+        <div class="m2">pagó · ${R.pct}%</div></div>
+    </div>`;}).join(''):`<div class="empty">${paneoModo==='activos'
+      ?'No hay préstamos activos para mostrar.':'Todavía no hay préstamos cargados.'}</div>`}</div>`;
+}
 function vClientes(){
   const q=cliQ.toLowerCase();
   const socios=S.settings.socios||[];
@@ -1471,6 +1579,7 @@ function vClientes(){
   const nombreFiltro=cliGestor==='todos'?'':cliGestor==='mios'?'tuyos (sin socio)':'de '+(socioNombre(cliGestor)||'socio');
   return `
   <div class="search"><input id="cliq" placeholder="Buscar cliente…" value="${esc(cliQ)}"></div>
+  <button class="btn sec" id="paneo-btn2" style="margin-bottom:4px">📊 Cómo venimos · cuánto pagó cada uno</button>
   ${conFiltro?`<div class="chips">
     <button class="${cliGestor==='todos'?'on':''}" data-cg="todos">👥 Todos (${cuenta('todos')})</button>
     <button class="${cliGestor==='mios'?'on':''}" data-cg="mios">🙋 Míos (${cuenta('mios')})</button>
@@ -1521,6 +1630,19 @@ function vCliente(id){
   <div class="docgrid">${docs.map(d=>`<div class="doc" data-doc="${d.id}">
     ${d.tipo&&d.tipo.includes('pdf')?'<div class="pdf">📄</div>':`<img src="${d.data}" loading="lazy">`}
     <div class="nm">${esc(d.nombre)}</div></div>`).join('')}</div>
+  ${(()=>{const R=paneoCliente(id,'activos');
+    if(!R.activos)return '';
+    const col=R.atraso>0?'var(--red)':R.adelanto>0?'var(--blue)':'var(--green)';
+    return `<h2>💵 Cuánto pagó al día de hoy</h2>
+    <div class="list" style="padding:14px">
+      <div style="font-size:26px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums">${fmt$(R.total)}</div>
+      <div class="t2">de ${fmt$(R.aDevolver)} de ${R.activos===1?'su préstamo activo':'sus '+R.activos+' préstamos activos'}${R.extras?` · incluye ${fmt$(R.extras)} de mora y cobrador`:''}</div>
+      <div class="progress" style="margin-top:10px"><i style="width:${R.pct}%;background:${col}"></i></div>
+      <div class="t2" style="margin-top:6px;color:${col};font-weight:700">${
+        R.atraso>0?`🔴 A esta altura tendría que haber pagado ${fmt$(R.esperado)}: faltan ${fmt$(R.atraso)}`
+        :R.adelanto>0?`🔵 Adelanto de ${fmt$(R.adelanto)} sobre lo que le tocaba pagar hasta hoy`:'✅ Al día con todo lo vencido hasta hoy'}</div>
+      <div class="t2" style="color:var(--muted)">${hace(R.dias)}</div>
+    </div>`;})()}
   ${vCumplimiento(id)}
   <h2>💵 Préstamos <span class="cnt">${loans.length}</span></h2>
   <div class="btnrow">
@@ -1621,6 +1743,20 @@ function vPrestamo(id){
         :(()=>{const p=loanCuotasPend(l).length;return p+' cuota'+(p===1?'':'s')+' pendiente'+(p===1?'':'s')+' de '+fmt$(l.cuotas[0].monto);})()}</div></div>
     <div class="stat ${moraTot>0?'red':'green'}"><div class="lbl">Mora acumulada</div><div class="val" style="font-size:17px">${fmt$(moraTot)}</div></div>
   </div>
+  ${(()=>{const P=pagoAlDia(l), activo=l.status==='activo';
+    const col=P.atraso>0?'var(--red)':P.adelanto>0?'var(--blue)':'var(--green)';
+    return `<h2>💵 Cuánto pagó al día de hoy</h2>
+    <div class="list" style="padding:14px">
+      <div style="font-size:26px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums">${fmt$(P.total)}</div>
+      <div class="t2">${fmt$(P.cuotas)} de cuotas${P.extras?` + <b style="color:var(--orange)">${fmt$(P.extras)}</b> de mora y cobrador`:''}</div>
+      <div class="progress" style="margin-top:10px"><i style="width:${P.pct}%;background:${col}"></i></div>
+      <div class="t2" style="margin-top:6px">Lleva pagado el <b>${P.pct}%</b> de los ${fmt$(l.total)} del préstamo${P.restante>0?` · faltan ${fmt$(P.restante)} de cuotas`:''}</div>
+      ${activo?`<div class="t2" style="margin-top:6px;color:${col};font-weight:700">${
+        P.atraso>0?`🔴 A esta altura tendría que haber pagado ${fmt$(P.esperado)}: faltan ${fmt$(P.atraso)}`
+        :P.adelanto>0?`🔵 A esta altura le tocaba ${fmt$(P.esperado)}: pagó ${fmt$(P.adelanto)} de más`
+        :'✅ Al día con las cuotas vencidas hasta hoy'}</div>`:''}
+      <div class="t2" style="color:var(--muted);margin-top:4px">${hace(P.ultimo?Math.round((pd(todayStr()).getTime()-pd(ymd(new Date(P.ultimo))).getTime())/DAY):null)}</div>
+    </div>`;})()}
   ${(()=>{const r=loanReparto(l);
     if(!r.compartido)return `<h2>🤝 Reparto de ganancia</h2>
     <div class="list" style="padding:14px">
@@ -3672,7 +3808,11 @@ function bindView(){
   {const rb=$('#rec-btn');if(rb)rb.onclick=()=>{recFilter='hoy';formRecordatorios();};
    const ab=$('#alias-btn');if(ab)ab.onclick=()=>copiarAlias(ab);
    const sb=$('#sim-btn');if(sb)sb.onclick=()=>formSimulador();
-   const cb=$('#cn-btn');if(cb)cb.onclick=()=>formContratoPrevio();}
+   const cb=$('#cn-btn');if(cb)cb.onclick=()=>formContratoPrevio();
+   const pb=$('#paneo-btn');if(pb)pb.onclick=()=>go('paneo');
+   const pb2=$('#paneo-btn2');if(pb2)pb2.onclick=()=>go('paneo');}
+  $$('[data-ps]').forEach(b=>b.onclick=()=>{paneoSort=b.dataset.ps;render();});
+  $$('[data-pm]').forEach(b=>b.onclick=()=>{paneoModo=b.dataset.pm;render();});
   $$('[data-cobrar]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n]=b.dataset.cobrar.split('|');formCobro(id,+n);});
   $$('[data-fecha]').forEach(b=>b.onclick=e=>{e.stopPropagation();
