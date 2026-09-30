@@ -336,7 +336,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=86; // mantener a la par del número de caché en sw.js
+const APP_VER=87; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -476,6 +476,7 @@ function moraDe(c,asOf){ // mora pendiente de cobro
 // sin esperar los días de gracia. La marca se guarda en la cuota al crear o guardar el préstamo.
 function marcarBordes(l){
   const cs=l&&l.cuotas||[], n=cs.length;
+  if(l&&l.acuerdo){cs.forEach(c=>{if(c.borde)delete c.borde;});return l;} // en un acuerdo no hay cobrador
   cs.forEach((c,i)=>{
     if(n>3&&(i===0||i===n-1))c.borde=true; else if(c.borde)delete c.borde;
   });
@@ -1053,8 +1054,8 @@ function filaCobranza(x,o){
   return `<div class="item" style="cursor:default">
     ${o.enGrupo?'':`<div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>`}
     <div class="mid">
-      <div class="t1">${o.enGrupo?`Cuota ${c.n}/${l.cuotas.length} · préstamo de ${fmt$(l.monto)}`:esc(cl.nombre)}</div>
-      <div class="t2">${o.enGrupo?'Vence':`Cuota ${c.n}/${l.cuotas.length} · vence`} ${dShort(c.vence)} · <b>${fmt$(total)}</b>${atr>0?` · <span style="color:var(--red)">${atr}d de atraso</span>`:''}</div>
+      <div class="t1">${o.enGrupo?`${etiquetaCuota(l,c)} · préstamo de ${fmt$(l.monto)}`:esc(cl.nombre)}</div>
+      <div class="t2">${o.enGrupo?'Vence':`${etiquetaCuota(l,c)} · vence`} ${dShort(c.vence)} · <b>${fmt$(total)}</b>${atr>0?` · <span style="color:var(--red)">${atr}d de atraso</span>`:''}</div>
       ${extra>0?`<div class="t2" style="color:var(--orange)">incluye ${fmt$(mora)} de mora${cob>0?` y ${fmt$(cob)} de cobrador`:''}</div>`:''}
       ${ya?`<div class="t2 acts"><span class="badge b-ok" data-desavisar="${key}" data-panel="${p}" style="cursor:pointer" title="tocá para sacar la marca">✓ avisado hoy</span></div>`:''}
       ${tel?'':'<div class="t2">sin teléfono cargado</div>'}
@@ -1768,6 +1769,11 @@ function vPrestamo(id){
   ${l.acuerdo?`<div class="list" style="padding:11px 14px;margin-bottom:12px;border:1px solid var(--blue)">
     <div class="t1" style="color:var(--blue)">🤝 Deuda acordada: ${fmt$(l.acuerdo.monto)}</div>
     <div class="t2">Fijada el ${dLong(ymd(new Date(l.acuerdo.t)))}${l.acuerdo.antes>l.acuerdo.monto?` · por sistema debía ${fmt$(l.acuerdo.antes)}`:''} · <b>la mora está frenada</b></div>
+    ${(()=>{const cs=cuotasAcuerdo(l);if(!cs.length)return '';
+      const pag=cs.filter(c=>cRestante(c)<=0).length, prox=cs.find(c=>cRestante(c)>0);
+      return `<div class="t2">${cs.length===1?`Un solo pago de ${fmt$(cs[0].monto)}`
+        :`${cs.length} pagos ${FREQ_ADJ[l.acuerdo.frecuencia||'semanal']||''} de ${fmt$(cs[0].monto)}`}
+        · <b>${pag}/${cs.length} pagados</b>${prox?` · próximo ${dLong(prox.vence)}`:' · 🎉 plan completo'}</div>`;})()}
     ${l.acuerdo.nota?`<div class="t2">📝 ${esc(l.acuerdo.nota)}</div>`:''}
     <div class="t2" style="margin-top:6px"><span class="clip" data-acuerdo="${id}">✏️ editar o quitar el acuerdo</span></div>
   </div>`:''}
@@ -1836,7 +1842,9 @@ function vPrestamo(id){
     const parcial=cPagadoBase(c)>0&&rest>0;
     const badge=(est==='pagada'?'<span class="badge b-ok">Pagada</span>'
       :esRenov?'<span class="badge b-com">Renovada</span>'
-      :c.esAcuerdo?'<span class="badge b-com">Acordada · sin mora</span>'
+      :c.esAcuerdo?`<span class="badge b-com">🤝 Acuerdo ${cuotasAcuerdo(l).indexOf(c)+1}/${cuotasAcuerdo(l).length} · sin mora</span>`
+        +(est==='vencida'?'<span class="badge b-ven">vencida</span>':est==='hoy'?'<span class="badge b-hoy">Hoy</span>'
+          :`<span class="badge b-fut">${dShort(c.vence)}</span>`)
       :c.congelada?'<span class="badge b-fut">Antes del acuerdo</span>'
       :est==='vencida'?`<span class="badge b-ven">${diasAtraso(c)}d mora</span>${cob>0?'<span class="badge b-cob">cobrador</span>':''}`
       :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>')
@@ -1912,6 +1920,7 @@ function copiarAlias(btn){ // copia el alias de cobro al portapapeles
     navigator.clipboard.writeText(a).then(ok).catch(()=>prompt('Copiá el alias:',a));
   else prompt('Copiá el alias:',a);
 }
+const FREQ_ADJ={diaria:'diarios',semanal:'semanales',quincenal:'quincenales'}; // "4 pagos semanales"
 function periodoPlural(freq,n){
   if(freq==='diaria')return n===1?'día':'días';
   if(freq==='semanal')return n===1?'semana':'semanas';
@@ -1991,8 +2000,10 @@ function recMsg(tipo,l,c){
   const cl=client(l.clientId)||{};
   const tpl=(S.settings.recordatorios||{})[tipo]||DEF_REC[tipo];
   const total=cRestante(c)+moraDe(c)+cobradorDe(c);
+  // en un acuerdo, la cuota se numera dentro del plan acordado (1/3, 2/3…), no sobre el préstamo viejo
+  const acs=c.esAcuerdo?cuotasAcuerdo(l):null;
   const map={
-    '{nombre}':cl.nombre||'', '{cuota}':c.n+'/'+l.cuotas.length,
+    '{nombre}':cl.nombre||'', '{cuota}':acs?(acs.indexOf(c)+1)+'/'+acs.length:c.n+'/'+l.cuotas.length,
     '{monto}':fmt$(cRestante(c)), '{mora}':fmt$(moraDe(c)), '{total}':fmt$(total),
     '{fecha}':dLong(c.vence), '{alias}':S.settings.alias||'',
     '{hora}':String(S.settings.horaLimite??18), '{negocio}':S.settings.nombreNegocio||''
@@ -2488,7 +2499,7 @@ function vCalendario(){
     return `<div class="item" ${rest>0?`data-cobrar="${l.id}|${c.n}"`:`data-loan="${l.id}"`}>
       <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
       <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
-        <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${FREQ[l.frecuencia]}</div></div>
+        <div class="t2">${etiquetaCuota(l,c)} · ${FREQ[l.frecuencia]}</div></div>
       <div class="end"><div class="m1">${fmt$(c.monto)}</div>
         <div class="m2">${rest<=0?'<span style="color:var(--green)">✓ pagada</span>':estadoCuota(c)==='vencida'?'<span style="color:var(--red)">vencida</span>':'pendiente'}</div></div>
     </div>`;}).join(''):'<div class="empty">Sin cobros este día</div>'}</div>
@@ -2503,7 +2514,7 @@ function vCalendario(){
       return `<div class="item" data-loan="${l.id}">
         <div class="ava ${cl.tipo==='comercio'?'shop':''}">${esc(ini(cl.nombre))}</div>
         <div class="mid"><div class="t1">${esc(cl.nombre)}${l.status==='renovado'?' <span class="badge b-com">renovado</span>':''}</div>
-          <div class="t2">Cuota ${c.n}/${l.cuotas.length} · ${p.renov?'🔄 saldado con la renovación':new Date(p.t).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+' hs'}${extras.length?' · '+extras.join(' · '):''}
+          <div class="t2">${etiquetaCuota(l,c)} · ${p.renov?'🔄 saldado con la renovación':new Date(p.t).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+' hs'}${extras.length?' · '+extras.join(' · '):''}
           ${p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?` · <span class="clip" data-doc="${p.comprobante}">📎</span>`:''}
           ${l.status==='renovado'?'':` · <span class="undo" data-undo="${l.id}|${c.n}|${p.t}" title="deshacer este cobro">✕ deshacer</span>`}</div></div>
         <div class="end"><div class="m1" style="color:var(--green)">${fmt$(tot)}</div><div class="m2">cobrado</div></div>
@@ -3194,26 +3205,56 @@ function formAcuerdo(loanId){
   <label>¿Cuánto va a pagar en total? *</label>
   <input id="ac-monto" type="number" inputmode="decimal" value="${ya?l.acuerdo.monto:''}" placeholder="${Math.round(hoyDebe)}">
   <div class="hint" id="ac-dif"></div>
-  <label>¿Para cuándo?</label>
+  <label>¿En cuántas veces?</label>
+  <input id="ac-n" type="number" inputmode="numeric" min="1" value="${ya?(l.acuerdo.cuotas||1):1}">
+  <div id="ac-freqbox" style="display:none">
+    <label>¿Cada cuánto paga?</label>
+    <div class="seg" id="ac-freq">${[['diaria','Diaria'],['semanal','Semanal'],['quincenal','Quincenal']].map(([v,t])=>
+      `<button data-v="${v}" class="${(ya?(l.acuerdo.frecuencia||'semanal'):'semanal')===v?'on':''}">${t}</button>`).join('')}</div>
+    <label class="chk" id="ac-dombox" style="display:none;border-color:var(--line)">
+      <input type="checkbox" id="ac-dom" ${ya&&l.acuerdo.skipDom?'checked':''}><span>Saltar los domingos</span></label>
+  </div>
+  <label id="ac-lblvence">¿Para cuándo?</label>
   <input id="ac-vence" type="date" value="${ya&&l.acuerdo.vence?l.acuerdo.vence:todayStr()}">
   <label>Nota (opcional)</label>
   <input id="ac-nota" placeholder="ej: acordado por teléfono, paga en 2 veces" value="${ya?esc(l.acuerdo.nota||''):''}">
-  <div class="hint">Las cuotas que quedaban se reemplazan por una sola con este monto. Lo que ya te pagó no se toca, y podés volver atrás cuando quieras.</div>
+  <div class="resume" id="ac-plan" style="display:none"></div>
+  <div class="hint">Las cuotas que quedaban se reemplazan por este plan. <b>Sin mora</b>, pero con sus fechas: entran en los recordatorios, en Cobros de hoy y en el calendario como cualquier cuota. Lo que ya te pagó no se toca, y podés volver atrás cuando quieras.</div>
   <button class="btn" id="ac-save" style="margin-top:16px">🤝 ${ya?'Actualizar el acuerdo':'Fijar la deuda'}</button>
   ${ya?'<button class="btn red sec" id="ac-quitar" style="margin-top:10px">↩️ Quitar el acuerdo y volver al cronograma original</button>':''}`);
+  let acFreq=ya?(l.acuerdo.frecuencia||'semanal'):'semanal';
+  const nCuotas=()=>Math.max(1,Math.min(200,Math.round(+$('#ac-n').value||1)));
+  const skipDom=()=>acFreq==='diaria'&&$('#ac-dom').checked;
   const upd=()=>{
-    const m=+$('#ac-monto').value||0;
-    if(!m){$('#ac-dif').textContent='Poné el monto total que acordaste que te va a pagar.';return;}
-    const dif=hoyDebe-m;
-    $('#ac-dif').innerHTML=dif>0?`Le perdonás <b style="color:var(--orange)">${fmt$(dif)}</b> respecto de lo que dice el sistema.`
-      :dif<0?`Es <b>${fmt$(-dif)}</b> más de lo que dice el sistema.`:'Igual a lo que dice el sistema.';
+    const m=+$('#ac-monto').value||0, n=nCuotas();
+    $('#ac-dif').innerHTML=!m?'Poné el monto total que acordaste que te va a pagar.'
+      :(()=>{const dif=hoyDebe-m;
+        return dif>0?`Le perdonás <b style="color:var(--orange)">${fmt$(dif)}</b> respecto de lo que dice el sistema.`
+          :dif<0?`Es <b>${fmt$(-dif)}</b> más de lo que dice el sistema.`:'Igual a lo que dice el sistema.';})();
+    $('#ac-freqbox').style.display=n>1?'':'none';
+    $('#ac-dombox').style.display=(n>1&&acFreq==='diaria')?'':'none';
+    $('#ac-lblvence').textContent=n>1?'¿Cuándo paga la primera?':'¿Para cuándo?';
+    const plan=$('#ac-plan');
+    if(!m||n<1){plan.style.display='none';return;}
+    const cs=genCuotas(Math.round(m),n,acFreq,$('#ac-vence').value||todayStr(),skipDom());
+    plan.style.display='';
+    plan.innerHTML=n===1
+      ? `Un solo pago de <b>${fmt$(cs[0].monto)}</b> el ${dLong(cs[0].vence)}.`
+      : `<b>${n} pagos ${FREQ_ADJ[acFreq]||''}</b> de ${fmt$(cs[0].monto)}${cs[n-1].monto!==cs[0].monto?` (el último ${fmt$(cs[n-1].monto)})`:''}<br>
+         <span style="font-size:12px">del ${dShort(cs[0].vence)} al ${dShort(cs[n-1].vence)} · sin mora, pero con recordatorio cada vez</span>`;
   };
-  $('#ac-monto').oninput=upd;upd();
+  $('#ac-monto').oninput=upd;
+  $('#ac-n').oninput=upd;
+  $('#ac-vence').onchange=upd;
+  $('#ac-dom').onchange=upd;
+  $$('#ac-freq button').forEach(b=>b.onclick=()=>{acFreq=b.dataset.v;
+    $$('#ac-freq button').forEach(x=>x.classList.toggle('on',x===b));upd();});
+  upd();
   $('#ac-save').onclick=()=>{
     const m=+$('#ac-monto').value;
     if(!m||m<0)return alert('Poné el monto acordado');
     const v=$('#ac-vence').value||todayStr();
-    aplicarAcuerdo(l,Math.round(m),v,$('#ac-nota').value.trim(),hoyDebe);
+    aplicarAcuerdo(l,Math.round(m),v,$('#ac-nota').value.trim(),hoyDebe,nCuotas(),acFreq,skipDom());
     closeModal();render();
     alert('Deuda acordada ✅\n'+esc(cl.nombre)+' queda debiendo '+fmt$(loanRestante(l))+'.\nLa mora dejó de correr.');
   };
@@ -3222,21 +3263,51 @@ function formAcuerdo(loanId){
     quitarAcuerdo(l);closeModal();render();
   };
 }
-function aplicarAcuerdo(l,monto,vence,nota,deudaAntes){
+function aplicarAcuerdo(l,monto,vence,nota,deudaAntes,nPagos,freq,skipDom){
   if(!l.acuerdo){ // guardamos el cronograma original una sola vez, para poder volver
     l.acuerdoPrev={cuotas:JSON.parse(JSON.stringify(l.cuotas)),total:l.total,status:l.status};
   }
   const base=l.acuerdoPrev?l.acuerdoPrev.cuotas:l.cuotas;
   // las cuotas con pagos quedan como historial, saldadas por lo que efectivamente entró
   const hist=base.filter(c=>(c.pagos||[]).length>0)
-    .map(c=>({...c,monto:cPagadoBase(c),congelada:true,borde:undefined}));
+    .map(c=>({...c,monto:cPagadoBase(c),congelada:true,borde:undefined,esAcuerdo:undefined}));
   const cobradoBase=hist.reduce((a,c)=>a+c.monto,0);
-  const n=hist.length?Math.max(...hist.map(c=>c.n))+1:1;
-  hist.push({n,vence,monto,pagos:[],congelada:true,esAcuerdo:true});
-  l.cuotas=hist;
+  let n=hist.length?Math.max(...hist.map(c=>c.n))+1:1;
+  // si ya había un acuerdo y el cliente pagó algo de él, esa plata se conserva y se
+  // vuelve a aplicar sobre el plan nuevo (antes se perdía al editar el acuerdo)
+  const pagosPrevios=cuotasAcuerdo(l).flatMap(c=>(c.pagos||[]).map(p=>({...p})));
+  // el plan acordado: una o varias cuotas, con su frecuencia. Congeladas = sin mora,
+  // pero con fecha propia, así entran en recordatorios, cobros del día y calendario.
+  const nn=Math.max(1,Math.round(nPagos||1)), f=freq||'semanal';
+  const nuevas=genCuotas(monto,nn,f,vence,f==='diaria'&&!!skipDom)
+    .map(c=>({n:n++,vence:c.vence,monto:c.monto,pagos:[],congelada:true,esAcuerdo:true}));
+  let idx=0;
+  pagosPrevios.forEach(p=>{
+    let resto=p.monto||0, primero=true;
+    while(resto>0&&idx<nuevas.length){
+      const c=nuevas[idx], falta=c.monto-cPagadoBase(c);
+      if(falta<=0){idx++;continue;}
+      const usa=Math.min(falta,resto);
+      c.pagos.push(primero?{...p,monto:usa}:{t:p.t,monto:usa,mora:0,cobrador:0});
+      resto-=usa; primero=false;
+      if(usa>=falta)idx++;
+    }
+    // si sobró (el acuerdo nuevo es más chico que lo ya pagado), queda en la última cuota
+    if(resto>0&&nuevas.length)nuevas[nuevas.length-1].pagos.push(
+      primero?{...p,monto:resto}:{t:p.t,monto:resto,mora:0,cobrador:0});
+  });
+  l.cuotas=hist.concat(nuevas);
   l.total=cobradoBase+monto;
-  l.acuerdo={monto,vence,nota:nota||'',t:Date.now(),antes:deudaAntes??monto};
+  l.acuerdo={monto,vence,nota:nota||'',t:Date.now(),antes:deudaAntes??monto,
+    cuotas:nn,frecuencia:f,skipDom:!!(f==='diaria'&&skipDom)};
   saveLoan(l);
+}
+// las cuotas del plan acordado, en orden (para numerarlas 1/3, 2/3… en avisos y pantallas)
+function cuotasAcuerdo(l){return (l.cuotas||[]).filter(c=>c.esAcuerdo);}
+// "Cuota 3/20" para un préstamo normal, "Acuerdo 2/3" para un plan acordado
+function etiquetaCuota(l,c){
+  if(c.esAcuerdo){const a=cuotasAcuerdo(l);return `Acuerdo ${a.indexOf(c)+1}/${a.length}`;}
+  return `Cuota ${c.n}/${l.cuotas.length}`;
 }
 function quitarAcuerdo(l){
   if(!l.acuerdoPrev)return;
@@ -3339,7 +3410,7 @@ function formFecha(loanId,nCuota){
   const l=loan(loanId);if(!l)return;
   const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
   const sigue=l.cuotas.filter(x=>x.n>c.n).length;
-  modal(`<h3>Cambiar fecha · cuota ${c.n}/${l.cuotas.length}</h3>
+  modal(`<h3>Cambiar fecha · ${etiquetaCuota(l,c).toLowerCase()}</h3>
   <div class="hint">Vencimiento actual: ${dLong(c.vence)}. Elegí la nueva fecha de pago para esta cuota.</div>
   <label>Nueva fecha de vencimiento</label>
   <input id="fe-fecha" type="date" value="${c.vence}">
@@ -3407,7 +3478,7 @@ function formCobro(loanId,nCuota,alVolver){
   let mora=moraDe(c),cob=cobradorDe(c),atr=diasAtraso(c); // se recalculan si cambia la fecha o las casillas
   const yaPago=cPagadoBase(c);
   const debeTotal=rest-desc+mora+cob;
-  modal(`<h3>Cobrar cuota ${c.n}/${l.cuotas.length}</h3>
+  modal(`<h3>Cobrar ${etiquetaCuota(l,c).toLowerCase()}</h3>
   <div class="hint">${esc(cl.nombre)} · vencía el ${dLong(c.vence)}${atr>0?` · <span style="color:var(--red)">${atr} día${atr>1?'s':''} de mora</span>`:''}
   ${yaPago>0?`<br>Cuota de ${fmt$(c.monto)} · ya cubrió ${fmt$(yaPago)} de la cuota${cTotalRecibido(c)!==yaPago?` (te pagó ${fmt$(cTotalRecibido(c))} en total, ${fmt$(cTotalRecibido(c)-yaPago)} fue a mora/cobrador)`:''}`:''}
   <span id="co-debe"><br>Debe ahora: <b style="color:var(--gold)">${fmt$(debeTotal)}</b>
