@@ -336,7 +336,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=85; // mantener a la par del número de caché en sw.js
+const APP_VER=86; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -346,6 +346,8 @@ const DEF_SETTINGS={
   nombreNegocio:'Mi Negocio', moneda:'$', alias:'PRESTAMOSPPP.1986',
   nombreDueno:'Lautaro', // para el saludo del inicio
   mora:{tipo:'pct', valor:10, porDia:false}, horaLimite:18,
+  // descuento por pronto pago: solo préstamos diarios sin ajustes a mano
+  descuento:{activo:true, pct:10, hora:14},
   cobrador:{monto:0, dias:3, bordes:true}, // bordes: 1ª y última cuota llevan cobrador desde el 1er día de mora
   diasNoLaborables:[0,6], // días que no cuentan para la mora (0=dom … 6=sáb). Por defecto sáb y dom
   socios:[],
@@ -359,6 +361,7 @@ function normSettings(st){st=st||{};
   return {...DEF_SETTINGS,...st,
     mora:{...DEF_SETTINGS.mora,...(st.mora||{})},
     cobrador:{...DEF_SETTINGS.cobrador,...(st.cobrador||{})},
+    descuento:{...DEF_SETTINGS.descuento,...(st.descuento||{})},
     diasNoLaborables:Array.isArray(st.diasNoLaborables)?st.diasNoLaborables:[0,6],
     socios:st.socios||[],
     purgados:Array.isArray(st.purgados)?st.purgados:[],
@@ -441,7 +444,10 @@ function cTotalRecibido(c){ // toda la plata que entró por esta cuota: cuota + 
   return (c.pagos||[]).reduce((a,p)=>a+(p.monto||0)+(p.mora||0)+(p.cobrador||0),0);}
 function cMoraPagada(c){return (c.pagos||[]).reduce((a,p)=>a+(p.mora||0),0);}
 function cCobradorPagado(c){return (c.pagos||[]).reduce((a,p)=>a+(p.cobrador||0),0);}
-function cRestante(c){return Math.max(0,c.monto-cPagadoBase(c));}
+function cDescuento(c){return (c.pagos||[]).reduce((a,p)=>a+(p.descuento||0),0);} // pronto pago
+// lo que resta de la cuota: el descuento la salda igual que la plata
+function cRestante(c){return Math.max(0,c.monto-cPagadoBase(c)-cDescuento(c));}
+function cCubierto(c){return cPagadoBase(c)+cDescuento(c);} // cuánto de la cuota quedó cubierto
 // asOf: momento desde el cual medir el atraso. Sirve para registrar un cobro con fecha
 // pasada y que la mora sea la que corría ESE día, no la de hoy. Sin él, mide hasta ahora.
 function diasAtraso(c,asOf){ // días HÁBILES de mora (los días no laborables configurados no cuentan)
@@ -504,11 +510,31 @@ function loanExtrasCobrados(l){ // mora + cobrador efectivamente cobrados (tambi
 // no baja de cero: si a una cuota le entró más de lo que valía, esa diferencia se
 // perdía de las cuentas. Acá se suma todo lo que entró, tal cual se registró.
 function loanPagadoCuotas(l){return l.cuotas.reduce((a,c)=>a+cPagadoBase(c),0);}
+function loanDescuentos(l){return l.cuotas.reduce((a,c)=>a+cDescuento(c),0);}
+/* ----- DESCUENTO POR PRONTO PAGO -----
+   Solo para préstamos DIARIOS que no se tocaron a mano (sin deuda acordada, sin cuotas
+   congeladas y sin fechas movidas). Se aplica cuando la cuota queda saldada, no antes:
+   si paga de a poco, el descuento entra recién con el pago que la completa. */
+function ajustadoAMano(l,c){
+  return !!(l.acuerdo||(c&&(c.esAcuerdo||c.congelada||c.fechaMovida)));
+}
+function descuentoAplica(l,c,fecha){
+  const d=S.settings.descuento||{};
+  if(!d.activo||!(+d.pct>0))return false;
+  if(l.frecuencia!=='diaria'||l.status!=='activo')return false;
+  if(ajustadoAMano(l,c))return false;
+  if(cRestante(c)<=0)return false;
+  return (fecha||todayStr())<=c.vence;   // no sirve para cuotas ya vencidas
+}
+function descuentoDe(l,c,fecha){ // cuánto se le descuenta si salda la cuota ahora
+  if(!descuentoAplica(l,c,fecha))return 0;
+  return Math.min(cRestante(c), Math.round(c.monto*(+S.settings.descuento.pct||0)/100));
+}
 function loanSobrepago(l){ // lo cobrado por encima del valor de las cuotas
   return l.cuotas.reduce((a,c)=>a+Math.max(0,cPagadoBase(c)-c.monto),0);
 }
-function loanGananciaProyectada(l){ // interés + extras ya cobrados + lo pagado de más
-  return loanGanancia(l)+loanExtrasCobrados(l)+loanSobrepago(l);
+function loanGananciaProyectada(l){ // interés + extras cobrados + lo pagado de más − descuentos dados
+  return loanGanancia(l)+loanExtrasCobrados(l)+loanSobrepago(l)-loanDescuentos(l);
 }
 function loanTotalCobrado(l){ // todo lo cobrado del préstamo: cuotas + mora + cobrador
   return loanPagadoCuotas(l)+loanExtrasCobrados(l);
@@ -528,14 +554,16 @@ function pagoAlDia(l){
   const t=todayStr(), activo=l.status==='activo';
   const cuotas=loanPagadoCuotas(l);                 // lo aplicado a cuotas (incluye lo pagado de más)
   const extras=loanExtrasCobrados(l);               // mora + cobrador cobrados
-  const esperado=activo?l.cuotas.reduce((a,c)=>a+(c.vence<=t?c.monto:0),0):cuotas;
+  const desc=loanDescuentos(l);                     // descuentos por pronto pago: saldan sin plata
+  const cubierto=cuotas+desc;                       // cuánto de las cuotas quedó cubierto
+  const esperado=activo?l.cuotas.reduce((a,c)=>a+(c.vence<=t?c.monto:0),0):cubierto;
   let ultimo=0;
   l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{if(!p.renov&&p.t>ultimo)ultimo=p.t;}));
-  return {cuotas,extras,total:cuotas+extras,esperado,sobra:loanSobrepago(l),
-    atraso:activo?Math.max(0,esperado-cuotas):0,
-    adelanto:activo?Math.max(0,cuotas-esperado):0,
+  return {cuotas,extras,desc,cubierto,total:cuotas+extras,esperado,sobra:loanSobrepago(l),
+    atraso:activo?Math.max(0,esperado-cubierto):0,
+    adelanto:activo?Math.max(0,cubierto-esperado):0,
     restante:l.status==='renovado'?0:loanRestante(l),
-    pct:l.total?Math.min(100,Math.round(cuotas*100/l.total)):0,
+    pct:l.total?Math.min(100,Math.round(cubierto*100/l.total)):0,
     ultimo};
 }
 // lo mismo pero juntando todos los préstamos de un cliente
@@ -1684,7 +1712,7 @@ function loanDeudaTotal(l){ // todo lo que resta, incluidas las cuotas futuras +
 function rowLoan(l){
   const cl=client(l.clientId)||{nombre:'?'};
   const renov=l.status==='renovado'; // el saldo se descontó de lo entregado en el préstamo nuevo
-  const pagado=loanPagadoCuotas(l);
+  const pagado=loanPagadoCuotas(l)+loanDescuentos(l);
   const pct=renov?100:(l.total?Math.min(100,Math.round(pagado/l.total*100)):0);
   const next=renov?null:loanCuotasPend(l)[0];
   const late=loanTieneVencidas(l);
@@ -1762,6 +1790,7 @@ function vPrestamo(id){
       <div style="font-size:26px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums">${fmt$(P.total)}</div>
       <div class="t2">${fmt$(P.cuotas)} de cuotas${P.extras?` + <b style="color:var(--orange)">${fmt$(P.extras)}</b> de mora y cobrador`:''}</div>
       ${P.sobra>0?`<div class="t2" style="color:var(--blue)">🔵 Incluye ${fmt$(P.sobra)} que pagó por encima del valor de las cuotas</div>`:''}
+      ${P.desc>0?`<div class="t2" style="color:var(--green)">🎁 Más ${fmt$(P.desc)} de descuento por pronto pago: esas cuotas quedaron saldadas igual</div>`:''}
       <div class="progress" style="margin-top:10px"><i style="width:${P.pct}%;background:${col}"></i></div>
       <div class="t2" style="margin-top:6px">Lleva pagado el <b>${P.pct}%</b> de los ${fmt$(l.total)} del préstamo${P.restante>0?` · faltan ${fmt$(P.restante)} de cuotas`:''}</div>
       ${activo?`<div class="t2" style="margin-top:6px;color:${col};font-weight:700">${
@@ -1811,18 +1840,20 @@ function vPrestamo(id){
       :c.congelada?'<span class="badge b-fut">Antes del acuerdo</span>'
       :est==='vencida'?`<span class="badge b-ven">${diasAtraso(c)}d mora</span>${cob>0?'<span class="badge b-cob">cobrador</span>':''}`
       :est==='hoy'?'<span class="badge b-hoy">Hoy</span>':'<span class="badge b-fut">'+dShort(c.vence)+'</span>')
-      +(parcial&&!esRenov?'<span class="badge b-cob">parcial</span>':'');
+      +(parcial&&!esRenov?'<span class="badge b-cob">parcial</span>':'')
+      +(cDescuento(c)>0?'<span class="badge b-ok">🎁 pronto pago</span>':'');
     // el detalle día por día se despliega tocando la cuota: así la fila queda corta
     // aunque el cliente la haya pagado en cinco veces
     const pagos=(c.pagos||[]).slice().sort((a,b)=>(a.t||0)-(b.t||0));
     const key=l.id+'|'+c.n, abierta=cuotaOpen.has(key);
     const extras=cMoraPagada(c)+cCobradorPagado(c);
-    const sobra=Math.max(0,cPagadoBase(c)-c.monto); // le entró más de lo que valía la cuota
+    const sobra=Math.max(0,cCubierto(c)-c.monto); // le entró más de lo que valía la cuota
+    const descC=cDescuento(c);                    // descuento por pronto pago ya aplicado
     return `<div class="cuota ${cls}" ${pagos.length?`data-cq="${key}" style="cursor:pointer"`:''}>
       <div class="num">${c.n}</div>
       <div class="mid" style="flex:1;min-width:0">
         <div class="t1" style="font-size:14px">${dLong(c.vence)} ${badge}</div>
-        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${parcial&&!esRenov?`<br><span style="color:var(--orange)">De la cuota pagó ${fmt$(cPagadoBase(c))} · restan ${fmt$(rest)}</span>`:''}${pagos.length?`<br>💰 Te pagó <b>${fmt$(cTotalRecibido(c))}</b> en ${pagos.length} ${pagos.length===1?'pago':'pagos'}${extras?` <span style="color:var(--muted)">(${fmt$(extras)} fue a mora/cobrador)</span>`:''}${sobra>0?` <span style="color:var(--blue)">· ${fmt$(sobra)} de más que el valor de la cuota</span>`:''}
+        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${parcial&&!esRenov?`<br><span style="color:var(--orange)">De la cuota pagó ${fmt$(cPagadoBase(c))} · restan ${fmt$(rest)}</span>`:''}${pagos.length?`<br>💰 Te pagó <b>${fmt$(cTotalRecibido(c))}</b> en ${pagos.length} ${pagos.length===1?'pago':'pagos'}${extras?` <span style="color:var(--muted)">(${fmt$(extras)} fue a mora/cobrador)</span>`:''}${descC>0?` <span style="color:var(--green)">· ${fmt$(descC)} de descuento por pronto pago</span>`:''}${sobra>0?` <span style="color:var(--blue)">· ${fmt$(sobra)} de más que el valor de la cuota</span>`:''}
         <span class="chev" style="color:var(--gold)">${abierta?'▾ ocultar el detalle':'▸ ver qué pagó cada día'}</span>`:''}</div>
       </div>
       ${esRenov?'':`<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
@@ -1831,11 +1862,12 @@ function vPrestamo(id){
       </div>`}
     </div>${(abierta&&pagos.length)?`<div class="repbox">${(()=>{let acum=0;
       return pagos.map(p=>{
-        const aCuota=p.monto||0, mo=p.mora||0, co=p.cobrador||0, tot=aCuota+mo+co;
-        acum+=aCuota; const queda=Math.max(0,c.monto-acum), demas=Math.max(0,acum-c.monto);
+        const aCuota=p.monto||0, mo=p.mora||0, co=p.cobrador||0, de=p.descuento||0, tot=aCuota+mo+co;
+        acum+=aCuota+de; const queda=Math.max(0,c.monto-acum), demas=Math.max(0,acum-c.monto);
         const partes=[`${fmt$(aCuota)} a la cuota`];
         if(mo)partes.push(`${fmt$(mo)} de mora`);
         if(co)partes.push(`${fmt$(co)} de cobrador`);
+        if(de)partes.push(`<span style="color:var(--green)">🎁 ${fmt$(de)} de descuento por pronto pago</span>`);
         return `<div class="repsub" style="cursor:default">
           <div class="mid">
             <div class="t1" style="font-size:14px">${dLong(ymd(new Date(p.t)))}${p.renov?' <span class="badge b-com">🔄 renovación</span>':''}${p.deCuota?` <span class="badge b-cob">vino de la cuota ${p.deCuota}</span>`:''}</div>
@@ -1911,6 +1943,16 @@ function contratoTexto(l,tipo){
     +`De no abonar en tiempo y forma, El Prestamista podrá disponer la gestión de cobranza a domicilio y las acciones legales que correspondan.\n\n`
     +`Al recibir la transferencia, El Prestatario acepta estas condiciones y el cronograma acordado con PRESTAMOS PPP.`;
 }
+// cláusula del descuento por pronto pago: solo si el préstamo puede tenerlo de verdad
+function descuentoTyC(l){
+  const d=S.settings.descuento||{};
+  if(!d.activo||!(+d.pct>0)||l.frecuencia!=='diaria'||l.acuerdo)return '';
+  const h=String(+d.hora||14).padStart(2,'0');
+  const ej=Math.round((l.cuotas[0].monto||0)*(+d.pct)/100);
+  return `*DESCUENTO POR PRONTO PAGO:* abonando la cuota completa antes de las ${h}:00 hs del día de vencimiento, `
+    +`se le bonifica el ${d.pct}% de esa cuota (${fmt$(ej)} sobre ${fmt$(l.cuotas[0].monto)}). `
+    +`El beneficio corre solo por la cuota que se cancela en su totalidad dentro de ese horario y no se acumula ni se traslada a cuotas vencidas.\n\n`;
+}
 function tycTexto(l){
   const cob=S.settings.cobrador||{dias:3,monto:15000};
   const hora=S.settings.horaLimite??18;
@@ -1919,6 +1961,7 @@ function tycTexto(l){
   return `*IMPORTANTE*\n`
     +`Por ${fmt$(l.monto)} son ${l.cuotas.length} ${periodoPlural(l.frecuencia,l.cuotas.length)} de ${fmt$(l.cuotas[0].monto)} a abonar antes de las ${hora} horas. `
     +`La primera y última cuota no tienen tolerancia, es decir que el mismo día antes de dicho horario debe impactar el pago en el sistema; caso contrario su ficha pasa por sistema automático al cobrador y le va a estar debiendo los ${fmt$(Number(cob.monto)||0)} de sus honorarios más la cuota más la Mora correspondiente, y luego de no impactar el pago se procede tal y como marcan las pautas que leyó anteriormente. El resto de las cuotas tienen ${cob.dias} día${cob.dias==1?'':'s'} de tolerancia, ${moraTextoLargo(l)}.\n\n`
+    +(descuentoTyC(l)||'')
     +`*Primer cobro:* ${dLong(l.cuotas[0].vence)}\n`
     +`*Último cobro:* ${dLong(ult.vence)}\n`
     +(alias?`*Abonar al alias:* ${alias}\n`:'')
@@ -2562,6 +2605,17 @@ function vAjustes(){
     <div class="dias" id="set-dias">${[[1,'Lun'],[2,'Mar'],[3,'Mié'],[4,'Jue'],[5,'Vie'],[6,'Sáb'],[0,'Dom']].map(([v,t])=>
       `<button data-v="${v}" class="${(st.diasNoLaborables||[]).includes(v)?'on':''}">${t}</button>`).join('')}</div>
     <div class="hint">Al guardar, los montos de mora de los préstamos vencidos se recalculan solos con estos días.</div>
+  </div>
+  <h2>🎁 Descuento por pronto pago</h2>
+  <div class="list" style="padding:4px 14px 16px">
+    <div class="hint" style="margin-top:10px">Premio para el que paga temprano. <b>Solo se ofrece en préstamos diarios</b> y en cuotas que no se tocaron a mano (sin deuda acordada, sin cuotas congeladas y sin fechas movidas). Se aplica recién cuando la cuota queda saldada: si paga de a poco, entra con el pago que la completa.</div>
+    <label class="chk" style="border-color:${st.descuento.activo?'var(--green)':'var(--line)'}">
+      <input type="checkbox" id="set-descon" ${st.descuento.activo?'checked':''}><span>Ofrecer el descuento al cobrar</span></label>
+    <label>Porcentaje de descuento (%)</label>
+    <input id="set-descpct" type="number" inputmode="decimal" value="${st.descuento.pct}">
+    <label>Hora tope para el descuento</label>
+    <select id="set-deschora">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===(+st.descuento.hora||14)?'selected':''}>${String(h).padStart(2,'0')}:00 hs</option>`).join('')}</select>
+    <div class="hint">Al cobrar vas a ver una casilla <b>"Pagó antes de las ${String(+st.descuento.hora||14).padStart(2,'0')}:00"</b>. Viene tildada sola si estás cargando el cobro antes de esa hora; si lo cargás más tarde, la tildás vos. Ojo con el número: como el total a devolver es más del doble de lo que prestás, cada 1% de descuento se lleva cerca de 2% de la ganancia.</div>
   </div>
   <h2>🏍 Cargo de cobrador</h2>
   <div class="list" style="padding:4px 14px 16px">
@@ -3306,11 +3360,12 @@ function formFecha(loanId,nCuota){
   $('#fe-save').onclick=()=>{
     const nueva=$('#fe-fecha').value;
     if(!nueva)return alert('Elegí una fecha');
+    // queda marcado que la fecha se tocó a mano: esas cuotas no llevan descuento por pronto pago
     if(modo==='cascada'&&sigue){
       const delta=Math.round((pd(nueva).getTime()-pd(c.vence).getTime())/DAY);
-      l.cuotas.forEach(x=>{if(x.n>=c.n)x.vence=ymd(new Date(pd(x.vence).getTime()+delta*DAY));});
+      l.cuotas.forEach(x=>{if(x.n>=c.n){x.vence=ymd(new Date(pd(x.vence).getTime()+delta*DAY));x.fechaMovida=true;}});
     }else{
-      c.vence=nueva;
+      c.vence=nueva; c.fechaMovida=true;
     }
     saveLoan(l);closeModal();render();
   };
@@ -3325,6 +3380,7 @@ function deshacerCobro(loanId,nCuota,tPago){
   if(p.monto>0)partes.push('cuota '+fmt$(p.monto));
   if(p.mora>0)partes.push('mora '+fmt$(p.mora));
   if(p.cobrador>0)partes.push('cobrador '+fmt$(p.cobrador));
+  if(p.descuento>0)partes.push('descuento '+fmt$(p.descuento)+' (se anula)');
   const fecha=new Date(p.t).toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'});
   if(!confirm(`¿Deshacer este cobro?\n\n${fmt$(total)} registrado el ${fecha}\n(${partes.join(' · ')})\n\nEsa plata vuelve a quedar pendiente y la mora se recalcula.`))return;
   const doc=p.comprobante?S.docs.find(d=>d.id===p.comprobante):null;
@@ -3340,17 +3396,29 @@ function formCobro(loanId,nCuota,alVolver){
   const c=l.cuotas.find(x=>x.n===nCuota);if(!c)return;
   const cl=client(l.clientId)||{nombre:'?'};
   const rest=cRestante(c);
-  let mora=moraDe(c),cob=cobradorDe(c),atr=diasAtraso(c); // se recalculan si cambia la fecha del pago
+  // descuento por pronto pago: la app sabe la hora solo si el cobro se carga en el momento;
+  // si no, el dueño marca la casilla. Empieza tildada solo cuando el reloj lo confirma.
+  const hDesc=+((S.settings.descuento||{}).hora)||14, hLim=S.settings.horaLimite??18;
+  const puedeDesc=descuentoAplica(l,c,todayStr());
+  const ahora=new Date();
+  let temprano=puedeDesc&&ahora.getHours()<hDesc;      // pagó antes de las 14
+  let aTiempo=ahora.getHours()<hLim;                   // pagó antes de la hora límite (sin mora)
+  let desc=temprano?descuentoDe(l,c,todayStr()):0;
+  let mora=moraDe(c),cob=cobradorDe(c),atr=diasAtraso(c); // se recalculan si cambia la fecha o las casillas
   const yaPago=cPagadoBase(c);
-  const debeTotal=rest+mora+cob;
+  const debeTotal=rest-desc+mora+cob;
   modal(`<h3>Cobrar cuota ${c.n}/${l.cuotas.length}</h3>
   <div class="hint">${esc(cl.nombre)} · vencía el ${dLong(c.vence)}${atr>0?` · <span style="color:var(--red)">${atr} día${atr>1?'s':''} de mora</span>`:''}
   ${yaPago>0?`<br>Cuota de ${fmt$(c.monto)} · ya cubrió ${fmt$(yaPago)} de la cuota${cTotalRecibido(c)!==yaPago?` (te pagó ${fmt$(cTotalRecibido(c))} en total, ${fmt$(cTotalRecibido(c)-yaPago)} fue a mora/cobrador)`:''}`:''}
   <span id="co-debe"><br>Debe ahora: <b style="color:var(--gold)">${fmt$(debeTotal)}</b>
-  <span style="font-size:11px">(cuota ${fmt$(rest)}${mora>0?' + mora '+fmt$(mora):''}${cob>0?' + cobrador '+fmt$(cob):''})</span></span></div>
+  <span style="font-size:11px">(cuota ${fmt$(rest)}${desc>0?' − descuento '+fmt$(desc):''}${mora>0?' + mora '+fmt$(mora):''}${cob>0?' + cobrador '+fmt$(cob):''})</span></span></div>
   <label>¿Cuándo te pagó?</label>
   <input id="co-fecha" type="date" value="${todayStr()}" max="${todayStr()}">
   <div class="hint" id="co-fechahint">Por defecto hoy. Si te pagó otro día, ponelo: la mora se recalcula a esa fecha.</div>
+  <label class="chk" id="co-temprano-box" style="${puedeDesc?'':'display:none'}">
+    <input type="checkbox" id="co-temprano" ${temprano?'checked':''}><span id="co-temprano-txt"></span></label>
+  <label class="chk" id="co-atiempo-box" style="border-color:var(--line);${aTiempo?'display:none':''}">
+    <input type="checkbox" id="co-atiempo" ${aTiempo?'checked':''}><span>Pagó antes de las ${String(hLim).padStart(2,'0')}:00 · ese día no suma mora</span></label>
   <label>Tipo de pago</label>
   <div class="seg" id="co-tipo">
     <button data-v="total" class="on">✅ Pagó todo</button>
@@ -3392,31 +3460,35 @@ function formCobro(loanId,nCuota,alVolver){
     const cb=Math.min(r,cobACobrar); r-=cb;
     return {base:r,mora:m,cobrador:cb};
   };
-  const totalEsperado=()=>rest+moraACobrar+cobACobrar;
+  const totalEsperado=()=>Math.max(0,rest-desc)+moraACobrar+cobACobrar;
   // primera cuota siguiente que sigue abierta: ahí puede ir lo que se pague de más
   const sig=l.cuotas.find(x=>x.n>c.n&&cRestante(x)>0);
   const pintarDesglose=()=>{
     const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
     $('#co-total').textContent=fmt$(base+m+cb);
-    const sobra=Math.max(0,base-rest), box=$('#co-sobra-box');
+    // el descuento entra solo si este pago SALDA la cuota; si no, se cobra el valor completo
+    const descAhora=(desc>0&&base>=rest-desc)?desc:0;
+    const sobra=Math.max(0,base-(rest-descAhora)), box=$('#co-sobra-box');
     if(box){
       if(sobra>0&&sig){box.style.display='';
         $('#co-sobra-txt').innerHTML=`Pasar los ${fmt$(sobra)} de más a la cuota ${sig.n}, que vence el ${dShort(sig.vence)}`;}
       else box.style.display='none';
     }
-    const quedaCuota=Math.max(0,rest-base), quedaMora=Math.max(0,moraACobrar-m), quedaCob=Math.max(0,cobACobrar-cb);
+    const quedaCuota=Math.max(0,rest-descAhora-base), quedaMora=Math.max(0,moraACobrar-m), quedaCob=Math.max(0,cobACobrar-cb);
     const debeDespues=quedaCuota+quedaMora+quedaCob, q=$('#co-queda');
     const partes=[];
     if(m>0)partes.push(`mora ${fmt$(m)}`);
     if(cb>0)partes.push(`cobrador ${fmt$(cb)}`);
     if(base>0)partes.push(`cuota ${fmt$(base)}`);
-    if(base+m+cb<=0){q.innerHTML='';return;}
-    let txt=`Se aplica a: ${partes.join(' · ')}`;
+    if(base+m+cb<=0&&descAhora<=0){q.innerHTML='';return;}
+    let txt=`Se aplica a: ${partes.join(' · ')||'nada en efectivo'}`;
+    if(descAhora>0)txt+=` <b style="color:var(--green)">+ descuento ${fmt$(descAhora)}</b>`;
     if(debeDespues>0){
       txt+=`<br>⚠️ Le queda debiendo <b style="color:var(--orange)">${fmt$(debeDespues)}</b>`
-        +(quedaCuota>0?` (${fmt$(quedaCuota)} de cuota${quedaMora>0?` + ${fmt$(quedaMora)} de mora`:''}). La cuota sigue abierta y sumando mora sobre su valor completo (${fmt$(c.monto)}).`:'.');
-    }else if(base>rest){
-      const s=base-rest, pasa=$('#co-sobra')&&$('#co-sobra').checked&&sig;
+        +(quedaCuota>0?` (${fmt$(quedaCuota)} de cuota${quedaMora>0?` + ${fmt$(quedaMora)} de mora`:''}). La cuota sigue abierta y sumando mora sobre su valor completo (${fmt$(c.monto)}).`:'.')
+        +(desc>0?`<br>🎁 Con este pago <b>no</b> alcanza a saldar la cuota, así que el descuento todavía no se aplica: se aplica cuando la complete a horario.`:'');
+    }else if(base>rest-descAhora){
+      const s=base-(rest-descAhora), pasa=$('#co-sobra')&&$('#co-sobra').checked&&sig;
       txt+=`<br>✅ La cuota queda <b style="color:var(--green)">saldada</b> y sobran <b style="color:var(--blue)">${fmt$(s)}</b>. `
         +(pasa?`Se le descuentan de la cuota ${sig.n}: va a quedar debiendo ${fmt$(Math.max(0,cRestante(sig)-s))} de esa cuota.`
           :sig?`Quedan como pagados de más: <b>no</b> se le descuentan de la cuota ${sig.n}, así que vas a terminar cobrando ${fmt$(s)} por encima del total del préstamo. Igual cuentan como plata cobrada.`
@@ -3442,21 +3514,34 @@ function formCobro(loanId,nCuota,alVolver){
     const r=+$('#co-recibido').value||0, esTotal=r>=totalEsperado();
     $$('#co-tipo button').forEach(b=>b.classList.toggle('on',b.dataset.v===(esTotal?'total':'parcial')));
   };
-  // cambiar la fecha del pago recalcula la mora y el cobrador como estaban ESE día
-  $('#co-fecha').onchange=()=>{
-    const f=$('#co-fecha').value||todayStr();
-    if(f>todayStr()){alert('No se puede registrar un cobro con fecha futura.');$('#co-fecha').value=todayStr();return;}
-    const asOf=momentoDe(f);
+  // la fecha del pago y las casillas de horario recalculan mora, cobrador y descuento
+  const fechaDe=()=>$('#co-fecha').value||todayStr();
+  const mediodia=f=>{const[Y,M,D]=f.split('-').map(Number);return new Date(Y,M-1,D,12,0,0).getTime();};
+  const recalcular=()=>{
+    const f=fechaDe(), hoy=f===todayStr();
+    temprano=puedeDesc&&$('#co-temprano')&&$('#co-temprano').checked&&f<=c.vence;
+    aTiempo=!hoy||temprano||($('#co-atiempo')&&$('#co-atiempo').checked);
+    // si pagó dentro del horario, la mora se mide al mediodía de ese día: ese día no suma
+    const asOf=aTiempo?mediodia(f):momentoDe(f);
     const m2=moraDe(c,asOf), cb2=cobradorDe(c,asOf), a2=diasAtraso(c,asOf);
     const cambio=(m2!==mora||cb2!==cob);
     mora=m2; cob=cb2; atr=a2;
     if(!condMora)moraACobrar=m2;
     if(!condCob)cobACobrar=cb2;
+    desc=temprano?descuentoDe(l,c,f):0;
+    const tb=$('#co-temprano-box');
+    if(tb){
+      tb.style.display=(puedeDesc&&f<=c.vence)?'':'none';
+      $('#co-temprano-txt').innerHTML=`Pagó antes de las ${String(hDesc).padStart(2,'0')}:00 · `
+        +`<b style="color:var(--green)">${S.settings.descuento.pct}% de descuento (${fmt$(descuentoDe(l,c,f)||Math.round(c.monto*(+S.settings.descuento.pct||0)/100))})</b>`;
+    }
+    const ab=$('#co-atiempo-box');
+    if(ab)ab.style.display=(hoy&&!temprano&&new Date().getHours()>=hLim)?'':'none';
     $('#co-condonar').style.display=m2>0&&!condMora?'':'none';
     $('#co-condcob').style.display=cb2>0&&!condCob?'':'none';
-    $('#co-debe').innerHTML=`<br>Debe ${f===todayStr()?'ahora':'al '+dShort(f)}: <b style="color:var(--gold)">${fmt$(rest+moraACobrar+cobACobrar)}</b>`
-      +` <span style="font-size:11px">(cuota ${fmt$(rest)}${moraACobrar>0?' + mora '+fmt$(moraACobrar):''}${cobACobrar>0?' + cobrador '+fmt$(cobACobrar):''})</span>`;
-    $('#co-fechahint').innerHTML=f===todayStr()
+    $('#co-debe').innerHTML=`<br>Debe ${f===todayStr()?'ahora':'al '+dShort(f)}: <b style="color:var(--gold)">${fmt$(totalEsperado())}</b>`
+      +` <span style="font-size:11px">(cuota ${fmt$(rest)}${desc>0?' − descuento '+fmt$(desc):''}${moraACobrar>0?' + mora '+fmt$(moraACobrar):''}${cobACobrar>0?' + cobrador '+fmt$(cobACobrar):''})</span>`;
+    $('#co-fechahint').innerHTML=hoy
       ?'Por defecto hoy. Si te pagó otro día, ponelo: la mora se recalcula a esa fecha.'
       :`Se registra con fecha <b>${dLong(f)}</b> (${a2} día${a2===1?'':'s'} de atraso a esa fecha).`
         +(cambio?` La mora quedó en <b>${fmt$(m2)}</b> en vez de la de hoy.`:'');
@@ -3464,6 +3549,12 @@ function formCobro(loanId,nCuota,alVolver){
       $('#co-recibido').value=totalEsperado();
     aplicarRecibido();
   };
+  $('#co-fecha').onchange=()=>{
+    if(fechaDe()>todayStr()){alert('No se puede registrar un cobro con fecha futura.');$('#co-fecha').value=todayStr();}
+    recalcular();
+  };
+  $('#co-temprano').onchange=recalcular;
+  $('#co-atiempo').onchange=recalcular;
   $('#co-sobra').onchange=pintarDesglose; // explicar en el momento qué pasa con el excedente
   ['co-base','co-mora','co-cob'].forEach(x=>$('#'+x).oninput=()=>{ // reparto manual: el total sigue la suma
     $('#co-recibido').value=(+$('#co-base').value||0)+(+$('#co-mora').value||0)+(+$('#co-cob').value||0);
@@ -3479,7 +3570,7 @@ function formCobro(loanId,nCuota,alVolver){
     $('#co-recibido').value=totalEsperado(); aplicarRecibido();
     $('#co-condcob').textContent='🤝 Cobrador condonado'; $('#co-condcob').disabled=true;
   };
-  pintarDesglose();
+  recalcular(); // deja listos el descuento, las casillas de horario y el desglose
   let coFile=null;
   $('#co-adj').onclick=()=>$('#co-file').click();
   $('#co-file').onchange=e=>{coFile=e.target.files[0]||null;
@@ -3488,8 +3579,11 @@ function formCobro(loanId,nCuota,alVolver){
   $('#co-alias').onclick=e=>copiarAlias(e.currentTarget);
   $('#co-save').onclick=async()=>{
     const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
-    if(base+m+cb<=0)return alert('El monto debe ser mayor a 0');
-    const sobra=Math.max(0,base-rest);
+    // deja pasar el caso raro en que el descuento cubre todo lo que faltaba de la cuota
+    if(base+m+cb<=0&&!(desc>0&&rest-desc<=0))return alert('El monto debe ser mayor a 0');
+    // el descuento por pronto pago solo entra si este cobro salda la cuota
+    const descAhora=(desc>0&&base>=rest-desc)?desc:0;
+    const sobra=Math.max(0,base-(rest-descAhora));
     // si le entró más de lo que quedaba de la cuota, por defecto pasa a la siguiente;
     // si no hay siguiente (o la destildó), se registra igual y queda como pagado de más
     const pasar=sobra>0&&!!sig&&!!$('#co-sobra')&&$('#co-sobra').checked;
@@ -3498,7 +3592,8 @@ function formCobro(loanId,nCuota,alVolver){
            :'Va a quedar registrado como pagado de más.')+'\n¿Continuar?'))return;
     const fPago=$('#co-fecha').value||todayStr();
     if(fPago>todayStr())return alert('No se puede registrar un cobro con fecha futura.');
-    const pago={t:momentoDe(fPago),monto:pasar?rest:base,mora:m,cobrador:cb};
+    const pago={t:momentoDe(fPago),monto:pasar?base-sobra:base,mora:m,cobrador:cb};
+    if(descAhora>0)pago.descuento=descAhora;
     if(coFile){
       const data=await compressImage(coFile);
       if(data){
@@ -3516,6 +3611,7 @@ function formCobro(loanId,nCuota,alVolver){
     const queda=cRestante(c);
     const tel=(cl.telefono||'').replace(/\D/g,'');
     const cuando=(fPago===todayStr()?'':`\nRegistrado con fecha ${dLong(fPago)}.`)
+      +(descAhora>0?`\n🎁 Se le aplicó ${fmt$(descAhora)} de descuento por pronto pago.`:'')
       +(pasar?`\n${fmt$(sobra)} se aplicaron a la cuota ${sig.n}.`:'');
     const aviso=queda>0
       ? `Pago parcial registrado ✅${cuando}\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).\n\n¿Enviar comprobante por WhatsApp?`
@@ -3525,9 +3621,10 @@ function formCobro(loanId,nCuota,alVolver){
         (queda>0?`Queda pendiente ${fmt$(queda)} de esta cuota, que sigue generando mora hasta cancelarse. `:'')+
         `Saldo restante del préstamo: ${fmt$(loanRestante(l))}. ¡Gracias! — ${S.settings.nombreNegocio}`;
       window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
-    }else if(!tel&&(queda>0||pasar))alert(
+    }else if(!tel&&(queda>0||pasar||descAhora>0))alert(
       (queda>0?`Pago parcial registrado ✅\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).`
              :'Cobro registrado ✅')
+      +(descAhora>0?`\n🎁 Se le aplicó ${fmt$(descAhora)} de descuento por pronto pago.`:'')
       +(pasar?`\n${fmt$(sobra)} se aplicaron a la cuota ${sig.n}.`:''));
     if(alVolver)alVolver(); // vuelve al panel de recordatorios para seguir con el siguiente
   };
@@ -4016,6 +4113,9 @@ function bindView(){
       S.settings.horaLimite=+$('#set-hora').value;
       S.settings.cobrador={monto:+$('#set-cobmonto').value||0,dias:+$('#set-cobdias').value||3,
         bordes:($$('#set-cobbordes button.on')[0]||{dataset:{v:'1'}}).dataset.v==='1'};
+      S.settings.descuento={activo:$('#set-descon').checked,
+        pct:Math.max(0,Math.min(100,+$('#set-descpct').value||0)),
+        hora:+$('#set-deschora').value};
       S.settings.recordatorios={
         hoy:$('#set-rec-hoy').value.trim()||DEF_REC.hoy,
         manana:$('#set-rec-manana').value.trim()||DEF_REC.manana,
