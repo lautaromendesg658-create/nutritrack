@@ -336,7 +336,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=83; // mantener a la par del número de caché en sw.js
+const APP_VER=84; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -3360,7 +3360,7 @@ function formCobro(loanId,nCuota,alVolver){
   <input id="co-recibido" type="number" inputmode="decimal" value="${debeTotal}">
   <div class="hint" id="co-queda"></div>
   <label class="chk" id="co-sobra-box" style="display:none">
-    <input type="checkbox" id="co-sobra" checked><span id="co-sobra-txt"></span></label>
+    <input type="checkbox" id="co-sobra"><span id="co-sobra-txt"></span></label>
   <div class="btnrow" style="margin-top:8px">
     <button class="btn sec mini" id="co-condonar" style="${mora>0?'':'display:none'}">🤝 Condonar mora</button>
     <button class="btn sec mini" id="co-condcob" style="${cob>0?'':'display:none'}">🤝 Condonar cobrador</button>
@@ -3416,8 +3416,11 @@ function formCobro(loanId,nCuota,alVolver){
       txt+=`<br>⚠️ Le queda debiendo <b style="color:var(--orange)">${fmt$(debeDespues)}</b>`
         +(quedaCuota>0?` (${fmt$(quedaCuota)} de cuota${quedaMora>0?` + ${fmt$(quedaMora)} de mora`:''}). La cuota sigue abierta y sumando mora sobre su valor completo (${fmt$(c.monto)}).`:'.');
     }else if(base>rest){
-      txt+=`<br>✅ La cuota queda <b style="color:var(--green)">saldada</b> y sobran <b style="color:var(--blue)">${fmt$(base-rest)}</b>`
-        +(sig?'.':' (no hay otra cuota abierta: quedan como pagados de más).');
+      const s=base-rest, pasa=$('#co-sobra')&&$('#co-sobra').checked&&sig;
+      txt+=`<br>✅ La cuota queda <b style="color:var(--green)">saldada</b> y sobran <b style="color:var(--blue)">${fmt$(s)}</b>. `
+        +(pasa?`Se le descuentan de la cuota ${sig.n}: va a quedar debiendo ${fmt$(Math.max(0,cRestante(sig)-s))} de esa cuota.`
+          :sig?`Quedan como pagados de más: <b>no</b> se le descuentan de la cuota ${sig.n}, así que vas a terminar cobrando ${fmt$(s)} por encima del total del préstamo. Igual cuentan como plata cobrada.`
+          :'No hay otra cuota abierta: quedan como pagados de más, pero se cuentan como plata cobrada.');
     }else{
       txt+='<br>✅ Con este pago la cuota queda <b style="color:var(--green)">saldada</b>.';
     }
@@ -3461,6 +3464,7 @@ function formCobro(loanId,nCuota,alVolver){
       $('#co-recibido').value=totalEsperado();
     aplicarRecibido();
   };
+  $('#co-sobra').onchange=pintarDesglose; // explicar en el momento qué pasa con el excedente
   ['co-base','co-mora','co-cob'].forEach(x=>$('#'+x).oninput=()=>{ // reparto manual: el total sigue la suma
     $('#co-recibido').value=(+$('#co-base').value||0)+(+$('#co-mora').value||0)+(+$('#co-cob').value||0);
     pintarDesglose();
