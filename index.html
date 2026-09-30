@@ -157,8 +157,8 @@
     .cols{display:grid;grid-template-columns:1fr 1fr;gap:0 26px;align-items:start}
       .cols.una{grid-template-columns:1fr}   /* si solo hay una, usa todo el ancho */
     .cols>div>h2:first-child{margin-top:14px}
-    /* los formularios no se estiran de punta a punta: se leen mejor angostos */
-    .angosto{max-width:780px}
+    /* Ajustes y Mi cuenta usan todo el ancho, igual que el calendario y las listas */
+    .angosto{max-width:none}
   }
 
   button{font-family:inherit;cursor:pointer}
@@ -336,7 +336,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=84; // mantener a la par del número de caché en sw.js
+const APP_VER=85; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
