@@ -144,6 +144,11 @@
   .pchk{display:flex;align-items:center;gap:8px;flex-shrink:0;cursor:pointer;padding:4px 2px}
   .pchk input{width:20px;height:20px;accent-color:var(--red);flex-shrink:0;margin:0}
   .pchk span{font-size:18px}
+  /* casilla de texto normal (no la de la papelera) */
+  .chk{display:flex;align-items:center;gap:9px;cursor:pointer;padding:10px 12px;margin-top:8px;
+    background:var(--panel-2);border:1px solid var(--blue);border-radius:12px;
+    font-size:13px;font-weight:600;color:var(--txt);text-transform:none;letter-spacing:0}
+  .chk input{width:20px;height:20px;accent-color:var(--blue);flex-shrink:0;margin:0}
   .btn[disabled]{opacity:.45;pointer-events:none}
   /* en pantallas anchas, liquidaciones a la izquierda y ganancias a la derecha:
      se aprovecha el costado y se baja menos con el dedo */
@@ -331,7 +336,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=82; // mantener a la par del número de caché en sw.js
+const APP_VER=83; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -495,11 +500,18 @@ function loanGanancia(l){return Math.max(0,(l.total||0)-(l.monto||0));}
 function loanExtrasCobrados(l){ // mora + cobrador efectivamente cobrados (también se reparten)
   return l.cuotas.reduce((a,c)=>a+cMoraPagada(c)+cCobradorPagado(c),0);
 }
-function loanGananciaProyectada(l){ // interés + extras ya cobrados
-  return loanGanancia(l)+loanExtrasCobrados(l);
+// Plata aplicada a las cuotas. OJO: no es l.total-loanRestante(l), porque cRestante
+// no baja de cero: si a una cuota le entró más de lo que valía, esa diferencia se
+// perdía de las cuentas. Acá se suma todo lo que entró, tal cual se registró.
+function loanPagadoCuotas(l){return l.cuotas.reduce((a,c)=>a+cPagadoBase(c),0);}
+function loanSobrepago(l){ // lo cobrado por encima del valor de las cuotas
+  return l.cuotas.reduce((a,c)=>a+Math.max(0,cPagadoBase(c)-c.monto),0);
+}
+function loanGananciaProyectada(l){ // interés + extras ya cobrados + lo pagado de más
+  return loanGanancia(l)+loanExtrasCobrados(l)+loanSobrepago(l);
 }
 function loanTotalCobrado(l){ // todo lo cobrado del préstamo: cuotas + mora + cobrador
-  return (l.total-loanRestante(l))+loanExtrasCobrados(l);
+  return loanPagadoCuotas(l)+loanExtrasCobrados(l);
 }
 function loanGananciaRealizada(l){ // recién es ganancia lo que se cobra por encima del capital prestado (punto neutro)
   return Math.max(0, loanTotalCobrado(l)-(l.monto||0));
@@ -514,12 +526,12 @@ function loanFaltaParaNeutro(l){ // cuánto falta cobrar de este préstamo para 
    se cuentan aparte, porque también son plata que el cliente puso. */
 function pagoAlDia(l){
   const t=todayStr(), activo=l.status==='activo';
-  const cuotas=(l.total||0)-loanRestante(l);        // lo aplicado a cuotas
+  const cuotas=loanPagadoCuotas(l);                 // lo aplicado a cuotas (incluye lo pagado de más)
   const extras=loanExtrasCobrados(l);               // mora + cobrador cobrados
   const esperado=activo?l.cuotas.reduce((a,c)=>a+(c.vence<=t?c.monto:0),0):cuotas;
   let ultimo=0;
   l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{if(!p.renov&&p.t>ultimo)ultimo=p.t;}));
-  return {cuotas,extras,total:cuotas+extras,esperado,
+  return {cuotas,extras,total:cuotas+extras,esperado,sobra:loanSobrepago(l),
     atraso:activo?Math.max(0,esperado-cuotas):0,
     adelanto:activo?Math.max(0,cuotas-esperado):0,
     restante:l.status==='renovado'?0:loanRestante(l),
@@ -529,10 +541,10 @@ function pagoAlDia(l){
 // lo mismo pero juntando todos los préstamos de un cliente
 function paneoCliente(clientId,modo){
   const ls=vLoans().filter(l=>l.clientId===clientId&&(modo==='todos'||l.status==='activo'));
-  const R={loans:ls.length,activos:0,prestado:0,aDevolver:0,cuotas:0,extras:0,
+  const R={loans:ls.length,activos:0,prestado:0,aDevolver:0,cuotas:0,extras:0,sobra:0,
     esperado:0,atraso:0,adelanto:0,restante:0,ultimo:0};
   ls.forEach(l=>{const p=pagoAlDia(l);
-    R.prestado+=l.monto||0; R.aDevolver+=l.total||0;
+    R.prestado+=l.monto||0; R.aDevolver+=l.total||0; R.sobra+=p.sobra;
     R.cuotas+=p.cuotas; R.extras+=p.extras; R.esperado+=p.esperado;
     R.atraso+=p.atraso; R.restante+=p.restante;
     if(l.status==='activo')R.activos++;
@@ -1672,8 +1684,8 @@ function loanDeudaTotal(l){ // todo lo que resta, incluidas las cuotas futuras +
 function rowLoan(l){
   const cl=client(l.clientId)||{nombre:'?'};
   const renov=l.status==='renovado'; // el saldo se descontó de lo entregado en el préstamo nuevo
-  const pagado=l.total-loanRestante(l);
-  const pct=renov?100:(l.total?Math.round(pagado/l.total*100):0);
+  const pagado=loanPagadoCuotas(l);
+  const pct=renov?100:(l.total?Math.min(100,Math.round(pagado/l.total*100)):0);
   const next=renov?null:loanCuotasPend(l)[0];
   const late=loanTieneVencidas(l);
   const debeHoy=loanDebeHoy(l), deudaTot=loanDeudaTotal(l), nVenc=loanCuotasVencidasHoy(l);
@@ -1749,6 +1761,7 @@ function vPrestamo(id){
     <div class="list" style="padding:14px">
       <div style="font-size:26px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums">${fmt$(P.total)}</div>
       <div class="t2">${fmt$(P.cuotas)} de cuotas${P.extras?` + <b style="color:var(--orange)">${fmt$(P.extras)}</b> de mora y cobrador`:''}</div>
+      ${P.sobra>0?`<div class="t2" style="color:var(--blue)">🔵 Incluye ${fmt$(P.sobra)} que pagó por encima del valor de las cuotas</div>`:''}
       <div class="progress" style="margin-top:10px"><i style="width:${P.pct}%;background:${col}"></i></div>
       <div class="t2" style="margin-top:6px">Lleva pagado el <b>${P.pct}%</b> de los ${fmt$(l.total)} del préstamo${P.restante>0?` · faltan ${fmt$(P.restante)} de cuotas`:''}</div>
       ${activo?`<div class="t2" style="margin-top:6px;color:${col};font-weight:700">${
@@ -1804,11 +1817,12 @@ function vPrestamo(id){
     const pagos=(c.pagos||[]).slice().sort((a,b)=>(a.t||0)-(b.t||0));
     const key=l.id+'|'+c.n, abierta=cuotaOpen.has(key);
     const extras=cMoraPagada(c)+cCobradorPagado(c);
+    const sobra=Math.max(0,cPagadoBase(c)-c.monto); // le entró más de lo que valía la cuota
     return `<div class="cuota ${cls}" ${pagos.length?`data-cq="${key}" style="cursor:pointer"`:''}>
       <div class="num">${c.n}</div>
       <div class="mid" style="flex:1;min-width:0">
         <div class="t1" style="font-size:14px">${dLong(c.vence)} ${badge}</div>
-        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${parcial&&!esRenov?`<br><span style="color:var(--orange)">De la cuota pagó ${fmt$(cPagadoBase(c))} · restan ${fmt$(rest)}</span>`:''}${pagos.length?`<br>💰 Te pagó <b>${fmt$(cTotalRecibido(c))}</b> en ${pagos.length} ${pagos.length===1?'pago':'pagos'}${extras?` <span style="color:var(--muted)">(${fmt$(extras)} fue a mora/cobrador)</span>`:''}
+        <div class="t2">${fmt$(c.monto)}${mora>0?' + <span style="color:var(--red)">'+fmt$(mora)+' mora</span>':''}${cob>0?' + <span style="color:var(--orange)">'+fmt$(cob)+' cobrador</span>':''}${parcial&&!esRenov?`<br><span style="color:var(--orange)">De la cuota pagó ${fmt$(cPagadoBase(c))} · restan ${fmt$(rest)}</span>`:''}${pagos.length?`<br>💰 Te pagó <b>${fmt$(cTotalRecibido(c))}</b> en ${pagos.length} ${pagos.length===1?'pago':'pagos'}${extras?` <span style="color:var(--muted)">(${fmt$(extras)} fue a mora/cobrador)</span>`:''}${sobra>0?` <span style="color:var(--blue)">· ${fmt$(sobra)} de más que el valor de la cuota</span>`:''}
         <span class="chev" style="color:var(--gold)">${abierta?'▾ ocultar el detalle':'▸ ver qué pagó cada día'}</span>`:''}</div>
       </div>
       ${esRenov?'':`<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
@@ -1818,14 +1832,16 @@ function vPrestamo(id){
     </div>${(abierta&&pagos.length)?`<div class="repbox">${(()=>{let acum=0;
       return pagos.map(p=>{
         const aCuota=p.monto||0, mo=p.mora||0, co=p.cobrador||0, tot=aCuota+mo+co;
-        acum+=aCuota; const queda=Math.max(0,c.monto-acum);
+        acum+=aCuota; const queda=Math.max(0,c.monto-acum), demas=Math.max(0,acum-c.monto);
         const partes=[`${fmt$(aCuota)} a la cuota`];
         if(mo)partes.push(`${fmt$(mo)} de mora`);
         if(co)partes.push(`${fmt$(co)} de cobrador`);
         return `<div class="repsub" style="cursor:default">
           <div class="mid">
-            <div class="t1" style="font-size:14px">${dLong(ymd(new Date(p.t)))}${p.renov?' <span class="badge b-com">🔄 renovación</span>':''}</div>
-            <div class="t2">${partes.join(' · ')}${queda>0?` · <span style="color:var(--orange)">quedó debiendo ${fmt$(queda)}</span>`:' · <span style="color:var(--green)">cuota saldada</span>'}</div>
+            <div class="t1" style="font-size:14px">${dLong(ymd(new Date(p.t)))}${p.renov?' <span class="badge b-com">🔄 renovación</span>':''}${p.deCuota?` <span class="badge b-cob">vino de la cuota ${p.deCuota}</span>`:''}</div>
+            <div class="t2">${partes.join(' · ')}${queda>0?` · <span style="color:var(--orange)">quedó debiendo ${fmt$(queda)}</span>`
+              :demas>0?` · <span style="color:var(--blue)">cuota saldada y ${fmt$(demas)} de más</span>`
+              :' · <span style="color:var(--green)">cuota saldada</span>'}</div>
             ${p.comprobante&&S.docs.find(d=>d.id===p.comprobante)?`<div class="t2"><span class="clip" data-doc="${p.comprobante}">📎 ver comprobante</span></div>`:''}
           </div>
           <div class="end"><div class="m1" style="color:var(--green)">${fmt$(tot)}</div>
@@ -3343,6 +3359,8 @@ function formCobro(loanId,nCuota,alVolver){
   <label>Total que te pagó</label>
   <input id="co-recibido" type="number" inputmode="decimal" value="${debeTotal}">
   <div class="hint" id="co-queda"></div>
+  <label class="chk" id="co-sobra-box" style="display:none">
+    <input type="checkbox" id="co-sobra" checked><span id="co-sobra-txt"></span></label>
   <div class="btnrow" style="margin-top:8px">
     <button class="btn sec mini" id="co-condonar" style="${mora>0?'':'display:none'}">🤝 Condonar mora</button>
     <button class="btn sec mini" id="co-condcob" style="${cob>0?'':'display:none'}">🤝 Condonar cobrador</button>
@@ -3375,9 +3393,17 @@ function formCobro(loanId,nCuota,alVolver){
     return {base:r,mora:m,cobrador:cb};
   };
   const totalEsperado=()=>rest+moraACobrar+cobACobrar;
+  // primera cuota siguiente que sigue abierta: ahí puede ir lo que se pague de más
+  const sig=l.cuotas.find(x=>x.n>c.n&&cRestante(x)>0);
   const pintarDesglose=()=>{
     const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
     $('#co-total').textContent=fmt$(base+m+cb);
+    const sobra=Math.max(0,base-rest), box=$('#co-sobra-box');
+    if(box){
+      if(sobra>0&&sig){box.style.display='';
+        $('#co-sobra-txt').innerHTML=`Pasar los ${fmt$(sobra)} de más a la cuota ${sig.n}, que vence el ${dShort(sig.vence)}`;}
+      else box.style.display='none';
+    }
     const quedaCuota=Math.max(0,rest-base), quedaMora=Math.max(0,moraACobrar-m), quedaCob=Math.max(0,cobACobrar-cb);
     const debeDespues=quedaCuota+quedaMora+quedaCob, q=$('#co-queda');
     const partes=[];
@@ -3389,6 +3415,9 @@ function formCobro(loanId,nCuota,alVolver){
     if(debeDespues>0){
       txt+=`<br>⚠️ Le queda debiendo <b style="color:var(--orange)">${fmt$(debeDespues)}</b>`
         +(quedaCuota>0?` (${fmt$(quedaCuota)} de cuota${quedaMora>0?` + ${fmt$(quedaMora)} de mora`:''}). La cuota sigue abierta y sumando mora sobre su valor completo (${fmt$(c.monto)}).`:'.');
+    }else if(base>rest){
+      txt+=`<br>✅ La cuota queda <b style="color:var(--green)">saldada</b> y sobran <b style="color:var(--blue)">${fmt$(base-rest)}</b>`
+        +(sig?'.':' (no hay otra cuota abierta: quedan como pagados de más).');
     }else{
       txt+='<br>✅ Con este pago la cuota queda <b style="color:var(--green)">saldada</b>.';
     }
@@ -3456,10 +3485,16 @@ function formCobro(loanId,nCuota,alVolver){
   $('#co-save').onclick=async()=>{
     const base=+$('#co-base').value||0,m=+$('#co-mora').value||0,cb=+$('#co-cob').value||0;
     if(base+m+cb<=0)return alert('El monto debe ser mayor a 0');
-    if(base>rest&&!confirm('Estás cobrando más que lo que resta de la cuota. ¿Continuar?'))return;
+    const sobra=Math.max(0,base-rest);
+    // si le entró más de lo que quedaba de la cuota, por defecto pasa a la siguiente;
+    // si no hay siguiente (o la destildó), se registra igual y queda como pagado de más
+    const pasar=sobra>0&&!!sig&&!!$('#co-sobra')&&$('#co-sobra').checked;
+    if(sobra>0&&!pasar&&!confirm(`Estás cobrando ${fmt$(sobra)} más de lo que resta de esta cuota.\n`
+      +(sig?'Va a quedar registrado como pagado de más, sin descontarse de la cuota '+sig.n+'.'
+           :'Va a quedar registrado como pagado de más.')+'\n¿Continuar?'))return;
     const fPago=$('#co-fecha').value||todayStr();
     if(fPago>todayStr())return alert('No se puede registrar un cobro con fecha futura.');
-    const pago={t:momentoDe(fPago),monto:base,mora:m,cobrador:cb};
+    const pago={t:momentoDe(fPago),monto:pasar?rest:base,mora:m,cobrador:cb};
     if(coFile){
       const data=await compressImage(coFile);
       if(data){
@@ -3468,10 +3503,16 @@ function formCobro(loanId,nCuota,alVolver){
       }else alert('No se pudo procesar la imagen del comprobante. El cobro se registra igual.');
     }
     c.pagos=c.pagos||[];c.pagos.push(pago);
+    if(pasar){ // el excedente entra como un pago propio de la cuota siguiente, con la misma fecha
+      sig.pagos=sig.pagos||[];
+      sig.pagos.push({t:pago.t,monto:sobra,mora:0,cobrador:0,
+        deCuota:c.n,...(pago.comprobante?{comprobante:pago.comprobante}:{})});
+    }
     saveLoan(l);closeModal();render();
     const queda=cRestante(c);
     const tel=(cl.telefono||'').replace(/\D/g,'');
-    const cuando=fPago===todayStr()?'':`\nRegistrado con fecha ${dLong(fPago)}.`;
+    const cuando=(fPago===todayStr()?'':`\nRegistrado con fecha ${dLong(fPago)}.`)
+      +(pasar?`\n${fmt$(sobra)} se aplicaron a la cuota ${sig.n}.`:'');
     const aviso=queda>0
       ? `Pago parcial registrado ✅${cuando}\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).\n\n¿Enviar comprobante por WhatsApp?`
       : `Cobro registrado ✅${cuando}\n¿Enviar comprobante por WhatsApp?`;
@@ -3480,7 +3521,10 @@ function formCobro(loanId,nCuota,alVolver){
         (queda>0?`Queda pendiente ${fmt$(queda)} de esta cuota, que sigue generando mora hasta cancelarse. `:'')+
         `Saldo restante del préstamo: ${fmt$(loanRestante(l))}. ¡Gracias! — ${S.settings.nombreNegocio}`;
       window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
-    }else if(!tel&&queda>0)alert(`Pago parcial registrado ✅\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).`);
+    }else if(!tel&&(queda>0||pasar))alert(
+      (queda>0?`Pago parcial registrado ✅\nQuedan ${fmt$(queda)} de esta cuota (la mora sigue corriendo).`
+             :'Cobro registrado ✅')
+      +(pasar?`\n${fmt$(sobra)} se aplicaron a la cuota ${sig.n}.`:''));
     if(alVolver)alVolver(); // vuelve al panel de recordatorios para seguir con el siguiente
   };
 }
