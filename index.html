@@ -336,7 +336,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=87; // mantener a la par del número de caché en sw.js
+const APP_VER=88; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -534,17 +534,29 @@ function descuentoDe(l,c,fecha){ // cuánto se le descuenta si salda la cuota ah
 function loanSobrepago(l){ // lo cobrado por encima del valor de las cuotas
   return l.cuotas.reduce((a,c)=>a+Math.max(0,cPagadoBase(c)-c.monto),0);
 }
-function loanGananciaProyectada(l){ // interés + extras cobrados + lo pagado de más − descuentos dados
-  return loanGanancia(l)+loanExtrasCobrados(l)+loanSobrepago(l)-loanDescuentos(l);
+/* ----- GASTOS DEL PRÉSTAMO -----
+   Plata que pusiste para cobrar ese préstamo (carteles, viajes…). Sale de la ganancia
+   ANTES de repartir, así la banca el socio en la misma proporción. Si el préstamo no
+   llega a cubrir capital + gastos, la diferencia la ponés vos: el socio nunca pone plata. */
+function loanGastos(l){return (l.gastos||[]).reduce((a,g)=>a+(+g.monto||0),0);}
+function loanGastosPrevios(l){ // los de antes de que el socio tomara el préstamo: los bancás solo
+  if(!l.gestorDesde)return 0;
+  const d=ymd(new Date(l.gestorDesde));
+  return (l.gastos||[]).reduce((a,g)=>a+((g.fecha&&g.fecha<d)?(+g.monto||0):0),0);
+}
+function loanGananciaProyectada(l){ // interés + extras cobrados + lo pagado de más − descuentos − gastos
+  return loanGanancia(l)+loanExtrasCobrados(l)+loanSobrepago(l)-loanDescuentos(l)-loanGastos(l);
 }
 function loanTotalCobrado(l){ // todo lo cobrado del préstamo: cuotas + mora + cobrador
   return loanPagadoCuotas(l)+loanExtrasCobrados(l);
 }
-function loanGananciaRealizada(l){ // recién es ganancia lo que se cobra por encima del capital prestado (punto neutro)
-  return Math.max(0, loanTotalCobrado(l)-(l.monto||0));
+// lo cobrado por encima del capital y los gastos (puede dar negativo: ahí todavía estás perdiendo)
+function loanNetoRealizado(l){return loanTotalCobrado(l)-(l.monto||0)-loanGastos(l);}
+function loanGananciaRealizada(l){ // recién es ganancia lo que supera capital + gastos (punto neutro)
+  return Math.max(0, loanNetoRealizado(l));
 }
-function loanFaltaParaNeutro(l){ // cuánto falta cobrar de este préstamo para recuperar el capital
-  return Math.max(0, (l.monto||0)-loanTotalCobrado(l));
+function loanFaltaParaNeutro(l){ // cuánto falta cobrar para recuperar el capital y los gastos
+  return Math.max(0, (l.monto||0)+loanGastos(l)-loanTotalCobrado(l));
 }
 /* ----- cuánto pagó al día de hoy -----
    Compara lo que entró con lo que tendría que haber entrado a la fecha.
@@ -619,14 +631,17 @@ function reasignarPrestamosDeCliente(clientId,gestorId){
 function gananciaPrevia(l){return Math.max(0,(l.gestorBase||0)-(l.monto||0));}
 function loanReparto(l){ // devuelve {socioNom, socioPct, miPct, gananciaTotal, miParte, socioParte, …}
   const g=loanGananciaProyectada(l), gr=loanGananciaRealizada(l);
-  if(!l.gestorId||!l.gestorPct){return {compartido:false, gananciaTotal:g, miParteTotal:g, miParteReal:gr};}
+  if(!l.gestorId||!l.gestorPct){return {compartido:false, gananciaTotal:g, miParteTotal:g, miParteReal:gr,
+    gastos:loanGastos(l), gastosPrevios:0};}
   const sp=Math.max(0,Math.min(100,l.gestorPct)), mp=100-sp;
   const nom=socioNombre(l.gestorId)||l.gestorNombre||'Socio';
   const previa=gananciaPrevia(l);                       // ganancia ya hecha antes del traspaso
-  const gComp=Math.max(0,g-previa), grComp=Math.max(0,gr-previa); // lo que sí se reparte
+  const gPrev=loanGastosPrevios(l);                     // gastos de antes del traspaso: los ponés vos
+  // lo que sí se reparte: la ganancia de acá en adelante, descontados los gastos de este tramo
+  const gComp=Math.max(0,g+gPrev-previa), grComp=Math.max(0,loanNetoRealizado(l)+gPrev-previa);
   const socioParteTotal=Math.round(gComp*sp/100), socioParteReal=Math.round(grComp*sp/100);
   return {compartido:true, socioNom:nom, socioPct:sp, miPct:mp, gananciaTotal:g, previa,
-    desde:l.gestorDesde||0,
+    gastos:loanGastos(l), gastosPrevios:gPrev, desde:l.gestorDesde||0,
     socioParteTotal, miParteTotal:g-socioParteTotal,
     socioParteReal, miParteReal:gr-socioParteReal};
 }
@@ -1223,9 +1238,10 @@ function ganadoCompletados(){
   // un grupo por persona: primero el que mira, después cada contraparte
   const mio={key:'__yo__',nombre:esSocio()?'Mi parte':'Mi parte (dueño)',ini:'YO',monto:0,items:[]};
   const otros={};
+  let gastos=0;
   fin.forEach(l=>{
     const g=loanGananciaRealizada(l), r=loanReparto(l);
-    bruto+=g;
+    bruto+=g; gastos+=loanGastos(l);
     const propio=esSocio()?(r.socioParteReal||0):(r.miParteReal!=null?r.miParteReal:g);
     const pctPropio=r.compartido?(esSocio()?r.socioPct:r.miPct):100;
     mio.monto+=propio; mio.items.push({l,parte:propio,pct:pctPropio});
@@ -1239,22 +1255,24 @@ function ganadoCompletados(){
   });
   const grupos=[mio,...Object.values(otros).sort((a,b)=>b.monto-a.monto)];
   grupos.forEach(g=>g.items.sort((a,b)=>b.parte-a.parte));
-  return {n:fin.length,bruto,grupos,compartido:Object.keys(otros).length>0};
+  return {n:fin.length,bruto,gastos,grupos,compartido:Object.keys(otros).length>0};
 }
 // cuánto falta cobrar de los préstamos activos para recuperar el capital prestado (punto neutro)
 function faltaNeutro(){
   const act=vLoans().filter(l=>l.status==='activo');
   let falta=0,nl=0;
-  act.forEach(l=>{const f=loanFaltaParaNeutro(l);if(f>0){falta+=f;nl++;}});
-  return {falta,nl,activos:act.length};
+  let gastos=0;
+  act.forEach(l=>{const f=loanFaltaParaNeutro(l);gastos+=loanGastos(l);if(f>0){falta+=f;nl++;}});
+  return {falta,nl,gastos,activos:act.length};
 }
 function vGanado(){
   const G=ganadoCompletados(), N=faltaNeutro();
   if(!G.n&&!N.activos)return '';
   return `
   ${G.n?`<div class="list" style="padding:14px 14px 4px;margin-top:10px">
-    <div class="t2" style="line-height:1.45">Dinero ganado con intereses, mora y cobrador hasta hoy de préstamos completados:</div>
+    <div class="t2" style="line-height:1.45">Dinero ganado con intereses, mora y cobrador hasta hoy de préstamos completados${G.gastos>0?', ya descontados los gastos':''}:</div>
     <div style="font-size:26px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;margin:6px 0 4px">${fmt$(G.bruto)}</div>
+    ${G.gastos>0?`<div class="t2" style="color:var(--orange)">💸 Les descontaste ${fmt$(G.gastos)} de gastos (carteles, viajes…)</div>`:''}
   </div>
   <div class="list" style="margin-bottom:10px">${G.grupos.map(g=>{
     const open=repartoOpen.has('gan:'+g.key), color=g.key==='__yo__'?'var(--green)':'var(--blue)';
@@ -1273,10 +1291,10 @@ function vGanado(){
   }).join('')}</div>`:''}
   <div class="list" style="padding:14px;${G.n?'':'margin-top:10px'}">
     ${N.activos?`
-    <div class="t2" style="line-height:1.45">Dinero que deben pagar clientes para estar neutros:</div>
+    <div class="t2" style="line-height:1.45">Dinero que deben pagar clientes para estar neutros${N.gastos>0?' (capital + gastos)':''}:</div>
     <div style="font-size:26px;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;margin-top:6px">${fmt$(N.falta)}</div>
     <div class="t2">${N.falta>0
-      ?`Es lo que falta cobrar de ${N.nl} de tus ${N.activos} préstamo${N.activos===1?'':'s'} activo${N.activos===1?'':'s'} para recuperar el capital que pusiste. De ahí en adelante, todo lo que entre es ganancia.`
+      ?`Es lo que falta cobrar de ${N.nl} de tus ${N.activos} préstamo${N.activos===1?'':'s'} activo${N.activos===1?'':'s'} para recuperar el capital que pusiste${N.gastos>0?` y los ${fmt$(N.gastos)} de gastos`:''}. De ahí en adelante, todo lo que entre es ganancia.`
       :`Ya recuperaste el capital de los ${N.activos} préstamo${N.activos===1?'':'s'} activo${N.activos===1?'':'s'}: todo lo que cobres de acá en más es ganancia. 🎉`}</div>`:''}
   </div>`;
 }
@@ -1544,6 +1562,76 @@ function ini(n){return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join
 
 /* ================= VISTA: CLIENTES ================= */
 function clienteDeuda(id){return vLoans().filter(l=>l.clientId===id&&l.status==='activo').reduce((a,l)=>a+loanRestante(l),0);}
+/* ----- gastos de un préstamo (carteles, viajes…) ----- */
+function vGastosLoan(l){
+  const gs=(l.gastos||[]).slice().sort((a,b)=>(a.fecha<b.fecha?-1:1));
+  const tot=loanGastos(l);
+  const ult=gs.length?gs[gs.length-1]:null;
+  return `
+  <h2>💸 Gastos de este préstamo${tot>0?` <span class="cnt">${fmt$(tot)}</span>`:''}</h2>
+  <div class="list" style="padding:${gs.length?'0':'14px'}">
+    ${gs.length?gs.map(g=>`<div class="item" style="cursor:default">
+      <div class="ava">🧾</div>
+      <div class="mid"><div class="t1">${esc(g.concepto||'Gasto')}</div>
+        <div class="t2 libre">${dLong(g.fecha)}${g.por?' · lo cargó '+esc(g.por):''}</div>
+        ${esSocio()?'':`<div class="t2"><span class="undo" data-delgasto="${l.id}|${g.id}">✕ borrar</span></div>`}</div>
+      <div class="end"><div class="m1" style="color:var(--orange)">${fmt$(g.monto)}</div></div>
+    </div>`).join('')
+    :`<div class="t2">Lo que pusiste de tu bolsillo para cobrar este préstamo: carteles, viajes, lo que sea.
+      Sale de la ganancia <b>antes</b> de repartir, así lo banca el socio en la misma proporción.</div>`}
+  </div>
+  ${esSocio()?'':`<div class="btnrow">
+    <button class="btn sec" data-gasto="${l.id}" style="flex:1">+ Agregar gasto</button>
+    ${ult?`<button class="btn sec" data-gastorep="${l.id}|${ult.id}" style="flex:1">🔁 Repetir ${fmt$(ult.monto)}</button>`:''}
+  </div>`}`;
+}
+function formGasto(loanId,copiaId){
+  const l=loan(loanId);if(!l)return;
+  if(esSocio())return alert('Los gastos los carga el dueño.');
+  const base=copiaId?(l.gastos||[]).find(g=>g.id===copiaId):null;
+  const cl=client(l.clientId)||{nombre:'?'};
+  modal(`<h3>💸 Gasto de este préstamo</h3>
+  <div class="hint">${esc(cl.nombre)} · lo que pusiste para poder cobrarlo. Se descuenta de la ganancia
+  antes de repartir con el socio, y mueve el punto neutro: hasta cubrir capital + gastos no ganás nada.</div>
+  <label>¿Cuánto? *</label>
+  <input id="gs-monto" type="number" inputmode="decimal" value="${base?base.monto:''}" placeholder="15000">
+  <label>¿En qué? *</label>
+  <input id="gs-con" value="${base?esc(base.concepto):''}" placeholder="ej: pegada de carteles">
+  <div class="chips" id="gs-sug">${['Pegada de carteles','Viaje de cobranza','Nafta','Llamadas','Otro gasto']
+    .map(t=>`<button data-t="${esc(t)}">${t}</button>`).join('')}</div>
+  <label>¿Cuándo?</label>
+  <input id="gs-fecha" type="date" value="${todayStr()}" max="${todayStr()}">
+  <div class="hint" id="gs-efecto"></div>
+  <button class="btn" id="gs-save" style="margin-top:16px">💸 Anotar el gasto</button>`);
+  const pintar=()=>{
+    const m=+$('#gs-monto').value||0, r=loanReparto(l);
+    $('#gs-efecto').innerHTML=!m?'':r.compartido
+      ? `Con este gasto, la ganancia a repartir pasa de ${fmt$(r.gananciaTotal)} a <b>${fmt$(r.gananciaTotal-m)}</b>:
+         ${fmt$(Math.round(m*r.miPct/100))} los ponés vos y ${fmt$(Math.round(m*r.socioPct/100))} ${esc(r.socioNom)}.`
+      : `Con este gasto, la ganancia de este préstamo pasa de ${fmt$(r.gananciaTotal)} a <b>${fmt$(r.gananciaTotal-m)}</b>.`;
+  };
+  $('#gs-monto').oninput=pintar; pintar();
+  $$('#gs-sug button').forEach(b=>b.onclick=()=>{$('#gs-con').value=b.dataset.t;});
+  $('#gs-save').onclick=()=>{
+    const m=Math.round(+$('#gs-monto').value||0);
+    if(!m||m<=0)return alert('Poné cuánto gastaste');
+    const con=$('#gs-con').value.trim();
+    if(!con)return alert('Poné en qué lo gastaste');
+    const f=$('#gs-fecha').value||todayStr();
+    if(f>todayStr())return alert('No se puede anotar un gasto con fecha futura.');
+    l.gastos=l.gastos||[];
+    l.gastos.push({id:uid(),monto:m,concepto:con,fecha:f,t:Date.now(),por:SESSION.nombre||''});
+    saveLoan(l);closeModal();render();
+  };
+}
+function borrarGasto(loanId,gastoId){
+  const l=loan(loanId);if(!l||esSocio())return;
+  const g=(l.gastos||[]).find(x=>x.id===gastoId);if(!g)return;
+  if(!confirm(`¿Borrar este gasto?\n\n${g.concepto} · ${fmt$(g.monto)} del ${dLong(g.fecha)}\n\nLa ganancia del préstamo vuelve a subir ${fmt$(g.monto)}.`))return;
+  l.gastos=l.gastos.filter(x=>x.id!==gastoId);
+  saveLoan(l);render();
+}
+
 /* ================= VISTA: PANEO DE PAGOS =================
    Un vistazo de cuánto pagó cada cliente al día de hoy y cuánto tendría que
    haber pagado a esta altura. */
@@ -1808,15 +1896,16 @@ function vPrestamo(id){
   ${(()=>{const r=loanReparto(l);
     if(!r.compartido)return `<h2>🤝 Reparto de ganancia</h2>
     <div class="list" style="padding:14px">
-      <div class="t2" style="margin-bottom:10px">Esta ganancia es toda para vos. Si la gestiona un socio, podés repartirla.</div>
+      <div class="t2" style="margin-bottom:10px">Esta ganancia es toda para vos${r.gastos>0?`, ya descontados ${fmt$(r.gastos)} de gastos`:''}. Si la gestiona un socio, podés repartirla.</div>
       <button class="btn mini" data-reparto="${id}">+ Compartir con un socio</button>
     </div>`;
     const falta=loanFaltaParaNeutro(l);
     return `<h2>🤝 Reparto de ganancia</h2>
     <div class="list" style="padding:14px">
-      <div class="t2" style="margin-bottom:10px">Ganancia del préstamo: <b style="color:var(--gold)">${fmt$(r.gananciaTotal)}</b><br><span style="font-size:11px">interés + mora y cobrador cobrados</span></div>
+      <div class="t2" style="margin-bottom:10px">Ganancia del préstamo: <b style="color:var(--gold)">${fmt$(r.gananciaTotal)}</b><br><span style="font-size:11px">interés + mora y cobrador cobrados${r.gastos>0?` − ${fmt$(r.gastos)} de gastos`:''}</span></div>
+      ${r.gastos>0?`<div class="t2" style="margin-bottom:10px;color:var(--orange)">💸 Los ${fmt$(r.gastos)} de gastos salen de la ganancia antes de repartir: los ponen los dos${r.gastosPrevios>0?`, salvo ${fmt$(r.gastosPrevios)} de antes del traspaso que bancás vos`:''}.</div>`:''}
       ${r.desde?`<div class="t2" style="margin-bottom:10px;color:var(--blue)">🤝 ${esc(r.socioNom)} lo tomó el ${dLong(ymd(new Date(r.desde)))}${l.gestorBase>0?` · para entonces ya habías cobrado ${fmt$(l.gestorBase)}`:''}.${r.previa>0?` De la ganancia, <b>${fmt$(r.previa)}</b> ya estaba hecha antes y es toda tuya; se reparte solo lo de acá en adelante.`:' Se reparte la ganancia de este préstamo desde esa fecha.'}</div>`:''}
-      ${falta>0?`<div class="t2" style="margin-bottom:10px;color:var(--orange)">🔄 Todavía recuperando el capital prestado (${fmt$(l.monto)}). Faltan cobrar ${fmt$(falta)} para llegar al punto neutro; recién de ahí en más se reparte.</div>`:''}
+      ${falta>0?`<div class="t2" style="margin-bottom:10px;color:var(--orange)">🔄 Todavía recuperando ${r.gastos>0?`el capital prestado y los gastos (${fmt$(l.monto)} + ${fmt$(r.gastos)})`:`el capital prestado (${fmt$(l.monto)})`}. Faltan cobrar ${fmt$(falta)} para llegar al punto neutro; recién de ahí en más se reparte.</div>`:''}
       <div class="cuota" style="padding:10px 0"><div class="num">YO</div>
         <div class="mid"><div class="t1" style="font-size:14px">Mi parte (${r.miPct}%)</div>
         <div class="t2">cobrado hasta ahora: ${fmt$(r.miParteReal)}</div></div>
@@ -1833,6 +1922,7 @@ function vPrestamo(id){
              <button class="btn mini" data-liqpagar="${id}" style="margin-top:8px;background:var(--green);color:var(--onColor)">✅ Ya le pagué</button></div>`):'')):''}
       ${esSocio()?'':`<button class="btn sec mini" data-reparto="${id}" style="margin-top:4px">✏️ Editar reparto</button>`}
     </div>`;})()}
+  ${vGastosLoan(l)}
   <h2>🗓 Cuotas</h2>
   <div class="list">${l.cuotas.map(c=>{
     const esRenov=l.status==='renovado';
@@ -4053,6 +4143,10 @@ function bindView(){
   $$('[data-undo]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n,t]=b.dataset.undo.split('|');deshacerCobro(id,+n,+t);});
   $$('[data-reparto]').forEach(b=>b.onclick=()=>formReparto(b.dataset.reparto));
+  $$('[data-gasto]').forEach(b=>b.onclick=()=>formGasto(b.dataset.gasto));
+  $$('[data-gastorep]').forEach(b=>b.onclick=()=>{const[id,g]=b.dataset.gastorep.split('|');formGasto(id,g);});
+  $$('[data-delgasto]').forEach(b=>b.onclick=e=>{e.stopPropagation();
+    const[id,g]=b.dataset.delgasto.split('|');borrarGasto(id,g);});
   $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
   $$('[data-vs]').forEach(b=>b.onclick=()=>{vencSort=b.dataset.vs;render();});
   $$('[data-cg]').forEach(b=>b.onclick=()=>{cliGestor=b.dataset.cg;render();});
