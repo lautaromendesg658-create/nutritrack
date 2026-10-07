@@ -336,7 +336,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=89; // mantener a la par del número de caché en sw.js
+const APP_VER=90; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1033,7 +1033,7 @@ aplicarTema();
 setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
 
 /* ================= NAVEGACIÓN ================= */
-let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), cuotaOpen=new Set(), vencSort='atraso';
+let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), calGestor='todos', loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), cuotaOpen=new Set(), vencSort='atraso';
 $$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
 $('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
 $('#hd-tema').onclick=()=>cambiarTema(temaActual()==='claro'?'oscuro':'claro');
@@ -1107,15 +1107,15 @@ function applyBiz(){
 }
 
 /* ================= VISTA: INICIO ================= */
-function cobrosDelDia(fecha){ // cuotas PROGRAMADAS para ese día (lo que hay que cobrar)
+function cobrosDelDia(fecha,ls){ // cuotas PROGRAMADAS para ese día (lo que hay que cobrar)
   const out=[];
-  vLoans().forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
+  (ls||vLoans()).forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
     l.cuotas.forEach(c=>{if(c.vence===fecha)out.push({l,c});});});
   return out;
 }
-function pagosDelDia(fecha){ // pagos REALMENTE recibidos ese día, de todos los préstamos (incluye renovados)
+function pagosDelDia(fecha,ls){ // pagos REALMENTE recibidos ese día, de todos los préstamos (incluye renovados)
   const out=[];
-  vLoans().forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
+  (ls||vLoans()).forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
     if(ymd(new Date(p.t))===fecha)out.push({l,c,p});})));
   return out.sort((a,b)=>a.p.t-b.p.t);
 }
@@ -2521,20 +2521,42 @@ function armarContrato(id,tipo){
 }
 
 /* ================= VISTA: CALENDARIO ================= */
-function balanceMes(y,m){ // vista simple de caja del mes: cuánto salió y cuánto entró
+function balanceMes(y,m,ls){ // vista simple de caja del mes: cuánto salió y cuánto entró
+  const base=ls||vLoans();
   let cobrado=0,baseC=0,moraC=0,cobC=0,nCobros=0;
-  vLoans().forEach(l=>{
+  base.forEach(l=>{
     l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{const d=new Date(p.t);
       if(d.getFullYear()===y&&d.getMonth()===m){
         const base=p.monto||0,mo=p.mora||0,co=p.cobrador||0;
         cobrado+=base+mo+co;baseC+=base;moraC+=mo;cobC+=co;nCobros++;
       }}));});
   let prestado=0,nNuevos=0;
-  vLoans().forEach(l=>{if(!l.createdAt)return;const d=new Date(l.createdAt);
+  base.forEach(l=>{if(!l.createdAt)return;const d=new Date(l.createdAt);
     if(d.getFullYear()===y&&d.getMonth()===m){prestado+=Math.max(0,(l.monto||0)-(l.refinanciado||0));nNuevos++;}});
   return {cobrado,baseC,moraC,cobC,nCobros,prestado,nNuevos,neto:cobrado-prestado};
 }
+// filtro del calendario: todo / solo lo mío (sin socio) / el de un socio
+function pasaGestor(l,g){
+  if(!g||g==='todos')return true;
+  if(g==='mios')return !l.gestorId;
+  return l.gestorId===g;
+}
+function loansCal(){
+  const socios=S.settings.socios||[];
+  if(esSocio()||!socios.length)calGestor='todos';   // el socio ya ve solo lo suyo
+  else if(calGestor!=='todos'&&calGestor!=='mios'&&!socios.some(s=>s.id===calGestor))calGestor='todos';
+  return vLoans().filter(l=>pasaGestor(l,calGestor));
+}
 function vCalendario(){
+  const LS_CAL=loansCal();
+  const socios=S.settings.socios||[];
+  const conFiltro=!esSocio()&&socios.length>0;
+  const cuentaCal=k=>vLoans().filter(l=>l.status==='activo'&&pasaGestor(l,k)).length;
+  const chipsCal=conFiltro?`<div class="chips">
+    <button class="${calGestor==='todos'?'on':''}" data-calg="todos">👥 Todos (${cuentaCal('todos')})</button>
+    <button class="${calGestor==='mios'?'on':''}" data-calg="mios">🙋 Míos (${cuentaCal('mios')})</button>
+    ${socios.map(s=>`<button class="${calGestor===s.id?'on':''}" data-calg="${s.id}">🤝 ${esc(s.nombre)} (${cuentaCal(s.id)})</button>`).join('')}
+  </div>`:'';
   const y=calRef.getFullYear(),m=calRef.getMonth();
   const first=new Date(y,m,1),start=(first.getDay()+6)%7; // lunes=0
   const dim=new Date(y,m+1,0).getDate(),t=todayStr();
@@ -2542,8 +2564,8 @@ function vCalendario(){
   for(let i=0;i<start;i++)cells+='<div class="cday off"></div>';
   for(let d=1;d<=dim;d++){
     const f=ymd(new Date(y,m,d));
-    const cob=cobrosDelDia(f);
-    const pgs=pagosDelDia(f);
+    const cob=cobrosDelDia(f,LS_CAL);
+    const pgs=pagosDelDia(f,LS_CAL);
     const cobradoDia=pgs.reduce((a,x)=>a+(x.p.monto||0)+(x.p.mora||0)+(x.p.cobrador||0),0);
     const tot=cob.reduce((a,x)=>a+x.c.monto,0);
     let dots='';
@@ -2559,10 +2581,10 @@ function vCalendario(){
       <span>${d}</span>${cobradoDia>0?`<span class="amt" style="color:var(--green)">${fmt$(cobradoDia)}</span>`
         :cob.length?`<span class="amt">${fmt$(tot)}</span>`:''}<span class="dots">${dots}</span></div>`;
   }
-  const sel=cobrosDelDia(calSel);
+  const sel=cobrosDelDia(calSel,LS_CAL);
   const mesNom=calRef.toLocaleDateString('es-AR',{month:'long',year:'numeric'});
   const mesCap=mesNom.charAt(0).toUpperCase()+mesNom.slice(1);
-  const b=balanceMes(y,m);
+  const b=balanceMes(y,m,LS_CAL);
   const netoColor=b.neto>=0?'var(--green)':'var(--red)';
   const balHTML=`<div class="list" id="cal-balance" style="padding:14px;margin-bottom:14px">
     <div class="t1" style="font-size:15px;margin-bottom:10px">📊 Balance de ${mesCap}</div>
@@ -2580,6 +2602,8 @@ function vCalendario(){
     <div class="mname">${mesNom}</div>
     <button data-cal="1">›</button>
   </div>
+  ${chipsCal}
+  ${calGestor!=='todos'?`<div class="resume" style="margin-bottom:12px">Mostrando solo ${calGestor==='mios'?'<b>tus clientes</b> (los que no tienen socio)':'los clientes de <b>'+esc(socioNombre(calGestor)||'socio')+'</b>'}: el balance, el calendario y los cobros del día son de ese grupo.</div>`:''}
   ${balHTML}
   <div class="dow">${['lu','ma','mi','ju','vi','sá','do'].map(d=>'<span>'+d+'</span>').join('')}</div>
   <div class="cgrid">${cells}</div>
@@ -2593,7 +2617,7 @@ function vCalendario(){
       <div class="end"><div class="m1">${fmt$(c.monto)}</div>
         <div class="m2">${rest<=0?'<span style="color:var(--green)">✓ pagada</span>':estadoCuota(c)==='vencida'?'<span style="color:var(--red)">vencida</span>':'pendiente'}</div></div>
     </div>`;}).join(''):'<div class="empty">Sin cobros este día</div>'}</div>
-  ${(()=>{const pgs=pagosDelDia(calSel);
+  ${(()=>{const pgs=pagosDelDia(calSel,LS_CAL);
     if(!pgs.length)return '';
     const totDia=pgs.reduce((a,x)=>a+(x.p.monto||0)+(x.p.mora||0)+(x.p.cobrador||0),0);
     return `<h2>💰 Pagos recibidos <span class="cnt">${fmt$(totDia)}</span></h2>
@@ -4150,6 +4174,7 @@ function bindView(){
   $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
   $$('[data-vs]').forEach(b=>b.onclick=()=>{vencSort=b.dataset.vs;render();});
   $$('[data-cg]').forEach(b=>b.onclick=()=>{cliGestor=b.dataset.cg;render();});
+  $$('[data-calg]').forEach(b=>b.onclick=()=>{calGestor=b.dataset.calg;render();});
   $$('[data-vg]').forEach(b=>b.onclick=()=>{const k=b.dataset.vg;
     vencOpen.has(k)?vencOpen.delete(k):vencOpen.add(k);render();});
   $$('[data-cal]').forEach(b=>b.onclick=()=>{calRef=new Date(calRef.getFullYear(),calRef.getMonth()+ +b.dataset.cal,1);render();});
