@@ -150,6 +150,11 @@
     font-size:13px;font-weight:600;color:var(--txt);text-transform:none;letter-spacing:0}
   .chk input{width:20px;height:20px;accent-color:var(--blue);flex-shrink:0;margin:0}
   .btn[disabled]{opacity:.45;pointer-events:none}
+  /* aviso de versión nueva: pegado arriba, no se puede ignorar */
+  #updbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    background:var(--gold);color:var(--onColor);border-radius:12px;padding:11px 14px;margin-bottom:12px;
+    font-size:13px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+  #updbar .btn{background:var(--onColor);color:var(--gold);flex:0 0 auto}
   /* en pantallas anchas, liquidaciones a la izquierda y ganancias a la derecha:
      se aprovecha el costado y se baja menos con el dedo */
   .cols>div:empty{display:none}
@@ -306,6 +311,10 @@
 </head>
 <body>
 <div class="wrap">
+  <div id="updbar" style="display:none">
+    <span style="flex:1;min-width:140px">🆕 Hay una versión nueva (<b id="updver"></b>). Actualizá para que todos vean los mismos números.</span>
+    <button class="btn mini" id="upd-ya">Actualizar ahora</button>
+  </div>
   <header>
     <div style="min-width:0">
       <h1 id="saludo">Hola</h1>
@@ -336,7 +345,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=90; // mantener a la par del número de caché en sw.js
+const APP_VER=91; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -4030,20 +4039,64 @@ function showLock(modo){
     };
   }
 }
-async function buscarActualizacion(){
+/* ================= AVISO DE VERSIÓN NUEVA =================
+   La app pregunta sola si hay una versión más nueva publicada: al abrirla, al volver
+   a ella y cada media hora. Si la hay, aparece una barra arriba que no se va hasta
+   actualizar, y la primera vez además un cartel. Sirve sobre todo para que el dueño y
+   los socios no queden en versiones distintas, que es cuando los números no coinciden. */
+let verNueva=0, avisoVisto=false, ultChequeo=0;
+async function versionPublicada(){
+  const r=await fetch('./index.html?v='+Date.now(),{cache:'no-store'});
+  if(!r.ok)throw new Error('http '+r.status);
+  const m=(await r.text()).match(/const APP_VER=(\d+)/);
+  return m?+m[1]:0;
+}
+function pintarAvisoVersion(){
+  const bar=$('#updbar'); if(!bar)return;
+  if(verNueva>APP_VER){bar.style.display='';$('#updver').textContent='v'+verNueva;}
+  else bar.style.display='none';
+}
+async function chequearVersion(forzado){
+  if(!navigator.onLine)return 0;
+  if(!forzado&&Date.now()-ultChequeo<5*60000)return verNueva;   // no preguntar de más
+  ultChequeo=Date.now();
+  let v=0; try{v=await versionPublicada();}catch(e){return 0;}
+  if(v>APP_VER){
+    verNueva=v; pintarAvisoVersion();
+    if(!avisoVisto){avisoVisto=true;modalActualizar();}
+  }
+  return v;
+}
+function modalActualizar(){
+  modal(`<h3>🆕 Versión v${verNueva} disponible</h3>
+  <div class="hint">Estás usando la v${APP_VER}. Conviene actualizar ahora: si vos y los socios
+  quedan en versiones distintas, las cuentas de un préstamo pueden verse diferentes en cada celular.
+  Tus datos no se tocan, es solo cambiar el programa.</div>
+  <button class="btn" id="upd-go" style="margin-top:16px">⬇️ Actualizar ahora</button>
+  <button class="btn sec" id="upd-luego" style="margin-top:10px">Ahora no</button>`);
+  $('#upd-go').onclick=actualizarApp;
+  $('#upd-luego').onclick=()=>{closeModal();pintarAvisoVersion();};
+}
+async function actualizarApp(){
+  const b=$('#upd-go')||$('#upd-ya'); if(b){b.textContent='⏳ Actualizando…';b.disabled=true;}
+  try{
+    if('serviceWorker' in navigator){
+      const reg=await navigator.serviceWorker.getRegistration();
+      if(reg){try{await reg.update();}catch(e){}
+        if(reg.waiting)reg.waiting.postMessage({type:'SKIP_WAITING'});}
+    }
+    if(window.caches){const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)));}
+  }catch(e){}
+  location.reload();
+}
+async function buscarActualizacion(){ // el botón de Ajustes, con aviso explícito
   const bu=$('#buscar-upd');
-  if(!('serviceWorker' in navigator))return alert('No disponible en este navegador.');
-  const reg=await navigator.serviceWorker.getRegistration();
-  if(!reg)return alert('Recargá la página e intentá de nuevo.');
   if(bu){bu.textContent='⏳ Buscando…';bu.disabled=true;}
-  let nueva=false;
-  reg.addEventListener('updatefound',()=>{nueva=true;});
-  try{await reg.update();}catch(e){}
-  setTimeout(()=>{
-    if(nueva||reg.waiting){alert('¡Hay una versión nueva! La app se va a recargar para instalarla.');location.reload();}
-    else{alert('Ya estás en la última versión (v'+APP_VER+') ✅');
-      if(bu){bu.textContent='🔁 Buscar actualización';bu.disabled=false;}}
-  },1500);
+  const v=await chequearVersion(true);
+  if(bu){bu.textContent='🔁 Buscar actualización';bu.disabled=false;}
+  if(v>APP_VER)return;                       // el cartel ya se abrió solo
+  if(!v)return alert('No se pudo consultar. Fijate que tengas internet y probá de nuevo.');
+  alert('Ya estás en la última versión (v'+APP_VER+') ✅');
 }
 function formAccesoSocio(socioId){ // el dueño crea o cambia el usuario/clave de un socio
   const soc=(S.settings.socios||[]).find(x=>x.id===socioId);if(!soc)return;
@@ -4358,6 +4411,11 @@ fbConnect(); // conectamos antes del login para conocer los accesos de socios cr
 if(sessionStorage.getItem('pc-unlocked')==='1'&&(getAuth()||esSocio()))unlockApp();
 else showLock();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+{const ub=$('#upd-ya');if(ub)ub.onclick=actualizarApp;}
+setTimeout(()=>chequearVersion(true),4000);                 // al abrir
+setInterval(()=>chequearVersion(),30*60000);                // cada media hora
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)chequearVersion();});
+window.addEventListener('online',()=>chequearVersion(true));
 </script>
 </body>
 </html>
