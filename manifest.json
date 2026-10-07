@@ -1,13 +1,13 @@
 {
-  "name": "NutriTrack AI",
-  "short_name": "NutriTrack",
-  "description": "Seguimiento diario de calorías, proteína y creatina",
+  "name": "PrestaControl — Gestión de Préstamos",
+  "short_name": "PrestaControl",
+  "description": "Gestión de préstamos personales y comerciales: clientes, cobros, mora automática y sincronización",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0a0c0a",
-  "theme_color": "#0a0c0a",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
   "icons": [
     { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
