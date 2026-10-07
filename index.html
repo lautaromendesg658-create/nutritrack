@@ -345,7 +345,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=91; // mantener a la par del número de caché en sw.js
+const APP_VER=92; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -1042,7 +1042,7 @@ aplicarTema();
 setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
 
 /* ================= NAVEGACIÓN ================= */
-let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), calGestor='todos', loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), cuotaOpen=new Set(), vencSort='atraso';
+let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), calGestor='todos', iniGestor='todos', loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), cuotaOpen=new Set(), vencSort='atraso';
 $$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
 $('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
 $('#hd-tema').onclick=()=>cambiarTema(temaActual()==='claro'?'oscuro':'claro');
@@ -1128,9 +1128,9 @@ function pagosDelDia(fecha,ls){ // pagos REALMENTE recibidos ese día, de todos 
     if(ymd(new Date(p.t))===fecha)out.push({l,c,p});})));
   return out.sort((a,b)=>a.p.t-b.p.t);
 }
-function cobrosVencidos(){
+function cobrosVencidos(ls){
   const t=todayStr(),out=[];
-  vLoans().forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
+  (ls||vLoans()).forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
     l.cuotas.forEach(c=>{if(cRestante(c)>0&&(c.vence<t||(c.vence===t&&Date.now()>dueAt(c.vence).getTime())))out.push({l,c});});});
   out.sort((a,b)=>a.c.vence<b.c.vence?-1:1);
   return out;
@@ -1171,9 +1171,9 @@ function sortGrupos(gs,mode){
 /* ----- LIQUIDACIÓN AL SOCIO: préstamos terminados cuya parte hay que pasarle ----- */
 const loanTerminado=l=>l.status==='pagado'||l.status==='renovado';
 function parteDelSocio(l){const r=loanReparto(l);return r.compartido?(r.socioParteReal||0):0;}
-function liquidaciones(){ // {pendientes:[], pagados:[]} de préstamos terminados con socio
+function liquidaciones(ls){ // {pendientes:[], pagados:[]} de préstamos terminados con socio
   const pend=[],pag=[];
-  vLoans().forEach(l=>{
+  (ls||vLoans()).forEach(l=>{
     if(!loanTerminado(l)||!l.gestorId||!l.gestorPct)return;
     const monto=l.socioPagado?(l.socioPagadoMonto??parteDelSocio(l)):parteDelSocio(l);
     if(monto<=0&&!l.socioPagado)return;
@@ -1198,8 +1198,8 @@ function marcarPagadoSocio(id,deshacer){
   }
   saveLoan(l);render();
 }
-function vLiquidaciones(){
-  const {pendientes,pagados}=liquidaciones();
+function vLiquidaciones(ls){
+  const {pendientes,pagados}=liquidaciones(ls);
   if(!pendientes.length&&!pagados.length)return '';
   const total=pendientes.reduce((a,x)=>a+x.monto,0);
   const porSocio={};
@@ -1236,8 +1236,8 @@ function vLiquidaciones(){
 }
 // ganancia ya embolsada de los préstamos terminados: lo cobrado por encima del capital de cada uno
 // (interés + mora + cobrador). Incluye los renovados, cuyo saldo se cobró al renovar.
-function ganadoCompletados(){
-  const fin=vLoans().filter(l=>l.status==='pagado'||l.status==='renovado');
+function ganadoCompletados(ls){
+  const fin=(ls||vLoans()).filter(l=>l.status==='pagado'||l.status==='renovado');
   let bruto=0;
   // un grupo por persona: primero el que mira, después cada contraparte
   const mio={key:'__yo__',nombre:esSocio()?'Mi parte':'Mi parte (dueño)',ini:'YO',monto:0,items:[]};
@@ -1262,15 +1262,15 @@ function ganadoCompletados(){
   return {n:fin.length,bruto,gastos,grupos,compartido:Object.keys(otros).length>0};
 }
 // cuánto falta cobrar de los préstamos activos para recuperar el capital prestado (punto neutro)
-function faltaNeutro(){
-  const act=vLoans().filter(l=>l.status==='activo');
+function faltaNeutro(ls){
+  const act=(ls||vLoans()).filter(l=>l.status==='activo');
   let falta=0,nl=0;
   let gastos=0;
   act.forEach(l=>{const f=loanFaltaParaNeutro(l);gastos+=loanGastos(l);if(f>0){falta+=f;nl++;}});
   return {falta,nl,gastos,activos:act.length};
 }
-function vGanado(){
-  const G=ganadoCompletados(), N=faltaNeutro();
+function vGanado(ls){
+  const G=ganadoCompletados(ls), N=faltaNeutro(ls);
   if(!G.n&&!N.activos)return '';
   return `
   ${G.n?`<div class="list" style="padding:14px 14px 4px;margin-top:10px">
@@ -1462,15 +1462,16 @@ function vPendientes(){ // contratos armados que todavía no se convirtieron en 
 }
 function vInicio(){
   const t=todayStr();
-  const activos=vLoans().filter(l=>l.status==='activo');
+  const LS=loansIni();                      // todo el inicio respeta el filtro por socio
+  const activos=LS.filter(l=>l.status==='activo');
   const prestado=activos.reduce((a,l)=>a+l.monto,0);
   const porCobrar=activos.reduce((a,l)=>a+loanRestante(l),0);
-  const hoy=cobrosDelDia(t).filter(x=>cRestante(x.c)>0);
+  const hoy=cobrosDelDia(t,LS).filter(x=>cRestante(x.c)>0);
   const hoyMonto=hoy.reduce((a,x)=>a+cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c),0);
-  const venc=cobrosVencidos();
+  const venc=cobrosVencidos(LS);
   const vencMonto=venc.reduce((a,x)=>a+cRestante(x.c)+moraDe(x.c)+cobradorDe(x.c),0);
   let cobradoHoy=0;
-  vLoans().forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
+  LS.forEach(l=>l.cuotas.forEach(c=>(c.pagos||[]).forEach(p=>{
     if(ymd(new Date(p.t))===t)cobradoHoy+=(p.monto||0)+(p.mora||0)+(p.cobrador||0);})));
   const interes=activos.reduce((a,l)=>a+(l.total-l.monto),0);
 
@@ -1517,13 +1518,15 @@ function vInicio(){
 
   // Dos columnas en pantallas anchas: a la izquierda la plata (liquidaciones + lo ganado),
   // a la derecha el reparto. Si una de las dos no tiene nada, la otra usa todo el ancho.
-  const colIzq=vLiquidaciones()+vGanado(), colDer=repartoHTML;
+  const colIzq=vLiquidaciones(LS)+vGanado(LS), colDer=repartoHTML;
   const colsHTML=(colIzq||colDer)?`<div class="cols${colIzq&&colDer?'':' una'}">${
     colIzq?`<div>${colIzq}</div>`:''}${colDer?`<div>${colDer}</div>`:''}</div>`:'';
 
   return `
+  ${chipsGestor('ig',iniGestor)}
+  ${avisoGestor(iniGestor)}
   <div class="stats">
-    <div class="stat blue"><div class="lbl">Clientes</div><div class="val">${vClients().length}</div></div>
+    <div class="stat blue"><div class="lbl">Clientes</div><div class="val">${vClients().filter(c=>iniGestor==='todos'||(iniGestor==='mios'?!c.gestorId:c.gestorId===iniGestor)).length}</div></div>
     <div class="stat gold"><div class="lbl">Préstamos activos</div><div class="val">${activos.length}</div></div>
     <div class="stat gold"><div class="lbl">Capital prestado</div><div class="val">${fmt$(prestado)}</div><div class="ex">activo en la calle</div></div>
     <div class="stat blue"><div class="lbl">Por cobrar</div><div class="val">${fmt$(porCobrar)}</div><div class="ex">incluye interés</div></div>
@@ -2085,9 +2088,9 @@ function enviarTyC(loanId){
 }
 
 /* ----- RECORDATORIOS DE VENCIMIENTO ----- */
-function recLista(tipo){
+function recLista(tipo,ls){
   const t=todayStr(), man=ymd(new Date(pd(t).getTime()+DAY)), out=[];
-  vLoans().forEach(l=>{if(l.status!=='activo')return;
+  (ls||loansIni()).forEach(l=>{if(l.status!=='activo')return;
     l.cuotas.forEach(c=>{if(cRestante(c)<=0)return;
       if(tipo==='hoy'&&c.vence===t)out.push({l,c});
       else if(tipo==='manana'&&c.vence===man)out.push({l,c});
@@ -2544,7 +2547,7 @@ function balanceMes(y,m,ls){ // vista simple de caja del mes: cuánto salió y c
     if(d.getFullYear()===y&&d.getMonth()===m){prestado+=Math.max(0,(l.monto||0)-(l.refinanciado||0));nNuevos++;}});
   return {cobrado,baseC,moraC,cobC,nCobros,prestado,nNuevos,neto:cobrado-prestado};
 }
-// filtro del calendario: todo / solo lo mío (sin socio) / el de un socio
+// filtros por gestor: todo / solo lo mío (sin socio) / el de un socio
 function pasaGestor(l,g){
   if(!g||g==='todos')return true;
   if(g==='mios')return !l.gestorId;
@@ -2556,16 +2559,32 @@ function loansCal(){
   else if(calGestor!=='todos'&&calGestor!=='mios'&&!socios.some(s=>s.id===calGestor))calGestor='todos';
   return vLoans().filter(l=>pasaGestor(l,calGestor));
 }
+function loansIni(){ // lo mismo para el inicio
+  const socios=S.settings.socios||[];
+  if(esSocio()||!socios.length)iniGestor='todos';
+  else if(iniGestor!=='todos'&&iniGestor!=='mios'&&!socios.some(s=>s.id===iniGestor))iniGestor='todos';
+  return vLoans().filter(l=>pasaGestor(l,iniGestor));
+}
+// los chips de filtro, iguales en todas las pantallas que los usan
+function chipsGestor(attr,activo,ls){
+  const socios=S.settings.socios||[];
+  if(esSocio()||!socios.length)return '';
+  const n=k=>vLoans().filter(l=>l.status==='activo'&&pasaGestor(l,k)).length;
+  return `<div class="chips">
+    <button class="${activo==='todos'?'on':''}" data-${attr}="todos">👥 Todos (${n('todos')})</button>
+    <button class="${activo==='mios'?'on':''}" data-${attr}="mios">🙋 Míos (${n('mios')})</button>
+    ${socios.map(s=>`<button class="${activo===s.id?'on':''}" data-${attr}="${s.id}">🤝 ${esc(s.nombre)} (${n(s.id)})</button>`).join('')}
+  </div>`;
+}
+function avisoGestor(g){
+  if(g==='todos')return '';
+  return `<div class="resume" style="margin:0 0 12px">Mostrando solo ${g==='mios'
+    ?'<b>tus clientes</b> (los que no tienen socio)'
+    :'los clientes de <b>'+esc(socioNombre(g)||'socio')+'</b>'}: todos los números de esta pantalla son de ese grupo.</div>`;
+}
 function vCalendario(){
   const LS_CAL=loansCal();
-  const socios=S.settings.socios||[];
-  const conFiltro=!esSocio()&&socios.length>0;
-  const cuentaCal=k=>vLoans().filter(l=>l.status==='activo'&&pasaGestor(l,k)).length;
-  const chipsCal=conFiltro?`<div class="chips">
-    <button class="${calGestor==='todos'?'on':''}" data-calg="todos">👥 Todos (${cuentaCal('todos')})</button>
-    <button class="${calGestor==='mios'?'on':''}" data-calg="mios">🙋 Míos (${cuentaCal('mios')})</button>
-    ${socios.map(s=>`<button class="${calGestor===s.id?'on':''}" data-calg="${s.id}">🤝 ${esc(s.nombre)} (${cuentaCal(s.id)})</button>`).join('')}
-  </div>`:'';
+  const chipsCal=chipsGestor('calg',calGestor);
   const y=calRef.getFullYear(),m=calRef.getMonth();
   const first=new Date(y,m,1),start=(first.getDay()+6)%7; // lunes=0
   const dim=new Date(y,m+1,0).getDate(),t=todayStr();
@@ -2612,7 +2631,7 @@ function vCalendario(){
     <button data-cal="1">›</button>
   </div>
   ${chipsCal}
-  ${calGestor!=='todos'?`<div class="resume" style="margin-bottom:12px">Mostrando solo ${calGestor==='mios'?'<b>tus clientes</b> (los que no tienen socio)':'los clientes de <b>'+esc(socioNombre(calGestor)||'socio')+'</b>'}: el balance, el calendario y los cobros del día son de ese grupo.</div>`:''}
+  ${avisoGestor(calGestor)}
   ${balHTML}
   <div class="dow">${['lu','ma','mi','ju','vi','sá','do'].map(d=>'<span>'+d+'</span>').join('')}</div>
   <div class="cgrid">${cells}</div>
@@ -4228,6 +4247,7 @@ function bindView(){
   $$('[data-vs]').forEach(b=>b.onclick=()=>{vencSort=b.dataset.vs;render();});
   $$('[data-cg]').forEach(b=>b.onclick=()=>{cliGestor=b.dataset.cg;render();});
   $$('[data-calg]').forEach(b=>b.onclick=()=>{calGestor=b.dataset.calg;render();});
+  $$('[data-ig]').forEach(b=>b.onclick=()=>{iniGestor=b.dataset.ig;render();});
   $$('[data-vg]').forEach(b=>b.onclick=()=>{const k=b.dataset.vg;
     vencOpen.has(k)?vencOpen.delete(k):vencOpen.add(k);render();});
   $$('[data-cal]').forEach(b=>b.onclick=()=>{calRef=new Date(calRef.getFullYear(),calRef.getMonth()+ +b.dataset.cal,1);render();});
