@@ -345,7 +345,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=92; // mantener a la par del número de caché en sw.js
+const APP_VER=93; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -806,15 +806,45 @@ async function revivir(t){
 // Al renovar, el saldo pendiente se descuenta de lo que se le entrega al cliente: en los hechos
 // esas cuotas se cobran en ese momento. Se registran como pagos reales para que cuenten en el
 // balance, en la ganancia y en el calendario, en vez de quedar como "renovadas" sin cobrar.
-function saldarPorRenovacion(v,cuando){
-  let n=0,total=0;
+function saldarPorRenovacion(v,cuando,conDesc){
+  let n=0,total=0,desc=0;
   (v.cuotas||[]).forEach(c=>{
     const r=cRestante(c); if(r<=0)return;
+    const d=conDesc?descuentoDe(v,c):0;   // pronto pago sobre las cuotas que adelanta
     c.pagos=c.pagos||[];
-    c.pagos.push({t:cuando||Date.now(),monto:r,mora:0,cobrador:0,renov:true});
-    n++; total+=r;
+    const pago={t:cuando||Date.now(),monto:r-d,mora:0,cobrador:0,renov:true};
+    if(d>0)pago.descuento=d;
+    c.pagos.push(pago);
+    n++; total+=r-d; desc+=d;
   });
-  return {n,total};
+  return {n,total,desc};
+}
+// Deshacer una renovación: el préstamo viejo vuelve a estar activo con sus cuotas pendientes
+// y el nuevo se va a la papelera. Sirve para rehacerla bien (p. ej. para aplicarle el pronto pago).
+function deshacerRenovacion(id){
+  const v=loan(id); if(!v||v.status!=='renovado')return;
+  if(esSocio())return alert('Esto lo tiene que hacer el dueño.');
+  const nuevo=v.renovadoEn?loan(v.renovadoEn):null;
+  const cobradoNuevo=nuevo?loanTotalCobrado(nuevo):0;
+  if(nuevo&&cobradoNuevo>0)return alert('No se puede deshacer todavía.\n\nEl préstamo nuevo ya tiene '
+    +fmt$(cobradoNuevo)+' cobrados. Deshacé primero esos cobros desde su ficha y volvé a intentar.');
+  const cuotas=(v.cuotas||[]).filter(c=>(c.pagos||[]).some(p=>p.renov)).length;
+  if(!confirm('¿Deshacer la renovación?\n\n• '+cuotas+' cuota(s) de este préstamo vuelven a quedar pendientes'
+    +(nuevo?'\n• El préstamo nuevo de '+fmt$(nuevo.monto)+' se manda a la papelera (se puede restaurar)':'')
+    +'\n\nDespués podés volver a renovar como corresponda.'))return;
+  v.cuotas.forEach(c=>{c.pagos=(c.pagos||[]).filter(p=>!p.renov);});
+  v.status='activo'; delete v.renovadoEn;
+  saveLoan(v);
+  if(nuevo)delEntity('loan',nuevo);
+  go('prestamos',v.id);
+  alert('Renovación deshecha ✅\nEl préstamo volvió a quedar activo con '+fmt$(loanRestante(v))+' pendientes.');
+}
+// cuánto se le perdonaría si en la renovación se le hace el pronto pago por lo que adelanta
+function descuentoRenovacion(v){
+  let desc=0,n=0;
+  (v.cuotas||[]).forEach(c=>{if(cRestante(c)<=0)return;
+    const d=descuentoDe(v,c); if(d>0){desc+=d;n++;}});
+  return {desc,n};
 }
 // marca la 1ª y la última cuota en los préstamos ya cargados (los nuevos se marcan al guardarse)
 function migrarBordes(){
@@ -1865,7 +1895,9 @@ function vPrestamo(id){
   return `
   <button class="back" data-go="prestamos">← Préstamos</button>
   ${l.renovadoDe&&loan(l.renovadoDe)?`<div class="list" style="padding:11px 14px;margin-bottom:12px"><div class="t2" data-loan="${l.renovadoDe}" style="cursor:pointer">🔄 Renovación de un préstamo anterior${l.refinanciado?` · se refinanció ${fmt$(l.refinanciado)}`:''} · <span style="color:var(--gold)">ver original ›</span></div></div>`:''}
-  ${l.status==='renovado'&&l.renovadoEn&&loan(l.renovadoEn)?`<div class="list" style="padding:11px 14px;margin-bottom:12px"><div class="t2" data-loan="${l.renovadoEn}" style="cursor:pointer">🔄 Este préstamo fue renovado · <span style="color:var(--gold)">ver préstamo nuevo ›</span></div></div>`:''}
+  ${l.status==='renovado'?`<div class="list" style="padding:11px 14px;margin-bottom:12px">
+    ${l.renovadoEn&&loan(l.renovadoEn)?`<div class="t2" data-loan="${l.renovadoEn}" style="cursor:pointer">🔄 Este préstamo fue renovado · <span style="color:var(--gold)">ver préstamo nuevo ›</span></div>`:'<div class="t2">🔄 Este préstamo fue renovado</div>'}
+    ${esSocio()?'':`<div class="t2" style="margin-top:6px"><span class="undo" data-desrenov="${id}">↩️ deshacer la renovación</span></div>`}</div>`:''}
   ${l.acuerdo?`<div class="list" style="padding:11px 14px;margin-bottom:12px;border:1px solid var(--blue)">
     <div class="t1" style="color:var(--blue)">🤝 Deuda acordada: ${fmt$(l.acuerdo.monto)}</div>
     <div class="t2">Fijada el ${dLong(ymd(new Date(l.acuerdo.t)))}${l.acuerdo.antes>l.acuerdo.monto?` · por sistema debía ${fmt$(l.acuerdo.antes)}`:''} · <b>la mora está frenada</b></div>
@@ -3286,34 +3318,47 @@ function formRenovar(viejoId){
     <button data-v="1" class="on">Saldarlo con la renovación</button>
     <button data-v="0">Sumar otro préstamo (sin cerrar este)</button>
   </div>
+  <label class="chk" id="rv-descbox" style="display:none;border-color:var(--green)">
+    <input type="checkbox" id="rv-desc"><span id="rv-desctxt"></span></label>
   <div class="resume" id="rv-resume">Completá monto y cuotas para ver el resumen.</div>
   <button class="btn" id="rv-save" style="margin-top:16px">🔄 Confirmar renovación</button>`);
   let skipSun=true, saldar=true;
+  const DR=descuentoRenovacion(v);          // lo que se le podría perdonar por adelantar
   $$('#rv-sun button').forEach(b=>b.onclick=()=>{skipSun=b.dataset.v==='1';
     $$('#rv-sun button').forEach(x=>x.classList.toggle('on',x===b));});
   $$('#rv-saldar button').forEach(b=>b.onclick=()=>{saldar=b.dataset.v==='1';
     $$('#rv-saldar button').forEach(x=>x.classList.toggle('on',x===b));upd();});
+  const conDesc=()=>saldar&&DR.desc>0&&$('#rv-desc')&&$('#rv-desc').checked;
+  $('#rv-desc').onchange=()=>upd();
   const upd=()=>{
     const mm=+$('#rv-monto').value||0,i=+$('#rv-int').value||0,n=+$('#rv-n').value||0,f=$('#rv-freq').value;
     $('#rv-sundiv').style.display=f==='diaria'?'':'none';
+    const box=$('#rv-descbox');
+    if(box){
+      box.style.display=(saldar&&DR.desc>0)?'':'none';
+      $('#rv-desctxt').innerHTML=`Hacerle el <b>${S.settings.descuento.pct}% de pronto pago</b> por las ${DR.n} cuota${DR.n===1?'':'s'} que adelanta (−${fmt$(DR.desc)})`;
+    }
     if(!mm||!n){$('#rv-resume').textContent='Completá monto y cuotas para ver el resumen.';return;}
     const total=Math.round(mm*(1+i/100));
     const cs=genCuotas(total,n,f,$('#rv-inicio').value||inicioDef,f==='diaria'&&skipSun);
-    const refin=saldar?saldo:0, enMano=mm-refin;
+    const dd=conDesc()?DR.desc:0;
+    const refin=saldar?saldo-dd:0, enMano=mm-refin;
     $('#rv-resume').innerHTML=`Total a devolver del nuevo: <b>${fmt$(total)}</b> · ganancia ${fmt$(total-mm)}<br>`
       +`${n} cuotas ${{diaria:'diarias',semanal:'semanales',quincenal:'quincenales'}[f]} de <b>${fmt$(cs[0].monto)}</b><br>`
-      +(saldar?`Se salda el préstamo actual (${fmt$(saldo)}).<br><span style="color:var(--gold)">Plata nueva en mano para el cliente: <b>${fmt$(enMano)}</b></span>`
+      +(saldar?`Se salda el préstamo actual (${fmt$(saldo)})${dd>0?` <span style="color:var(--green)">− ${fmt$(dd)} de pronto pago = ${fmt$(saldo-dd)}</span>`:''}.<br><span style="color:var(--gold)">Plata nueva en mano para el cliente: <b>${fmt$(enMano)}</b></span>`
               :`El préstamo actual sigue abierto y se suma uno nuevo en paralelo.`)
       +(enMano<0?`<br><span style="color:var(--red)">⚠️ El monto nuevo es menor que el saldo. Revisalo.</span>`:'');
   };
   ['rv-monto','rv-int','rv-n','rv-freq','rv-inicio'].forEach(x=>$('#'+x).oninput=$('#'+x).onchange=upd);
+  upd(); // deja lista la casilla de pronto pago apenas se abre
   $('#rv-save').onclick=()=>{
     const mm=+$('#rv-monto').value,i=+$('#rv-int').value||0,n=+$('#rv-n').value,f=$('#rv-freq').value,ini=$('#rv-inicio').value;
     if(!mm||mm<=0)return alert('Poné el monto del nuevo préstamo');
     if(!n||n<1)return alert('Poné la cantidad de cuotas');
     if(!ini)return alert('Elegí la fecha del primer cobro');
-    const refin=saldar?saldo:0;
-    if(saldar&&mm<saldo&&!confirm('El monto nuevo ('+fmt$(mm)+') es menor que el saldo pendiente ('+fmt$(saldo)+'). El cliente no recibiría plata. ¿Continuar igual?'))return;
+    const dd=conDesc()?DR.desc:0;
+    const refin=saldar?saldo-dd:0;
+    if(saldar&&mm<refin&&!confirm('El monto nuevo ('+fmt$(mm)+') es menor que el saldo pendiente ('+fmt$(refin)+'). El cliente no recibiría plata. ¿Continuar igual?'))return;
     const total=Math.round(mm*(1+i/100));
     const nuevo={id:uid(),clientId:v.clientId,tipo:v.tipo,monto:mm,interes:i,total,
       frecuencia:f,inicio:ini,cuotas:genCuotas(total,n,f,ini,f==='diaria'&&skipSun),
@@ -3324,7 +3369,7 @@ function formRenovar(viejoId){
     if(saldar){
       // el saldo se descontó de la plata que le entregaste: esas cuotas quedan COBRADAS hoy,
       // así entran en el balance y en la ganancia en vez de quedar en el limbo
-      saldarPorRenovacion(v,nuevo.createdAt);
+      saldarPorRenovacion(v,nuevo.createdAt,dd>0);
       v.status='renovado';v.renovadoEn=nuevo.id;touch(v);persist();fbPush('loan',v);
     }
     closeModal();go('prestamos',nuevo.id);
@@ -4239,6 +4284,7 @@ function bindView(){
   $$('[data-undo]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,n,t]=b.dataset.undo.split('|');deshacerCobro(id,+n,+t);});
   $$('[data-reparto]').forEach(b=>b.onclick=()=>formReparto(b.dataset.reparto));
+  $$('[data-desrenov]').forEach(b=>b.onclick=e=>{e.stopPropagation();deshacerRenovacion(b.dataset.desrenov);});
   $$('[data-gasto]').forEach(b=>b.onclick=()=>formGasto(b.dataset.gasto));
   $$('[data-gastorep]').forEach(b=>b.onclick=()=>{const[id,g]=b.dataset.gastorep.split('|');formGasto(id,g);});
   $$('[data-delgasto]').forEach(b=>b.onclick=e=>{e.stopPropagation();
