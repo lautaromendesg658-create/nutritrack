@@ -345,7 +345,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=93; // mantener a la par del número de caché en sw.js
+const APP_VER=94; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -835,7 +835,10 @@ function deshacerRenovacion(id){
   v.cuotas.forEach(c=>{c.pagos=(c.pagos||[]).filter(p=>!p.renov);});
   v.status='activo'; delete v.renovadoEn;
   saveLoan(v);
-  if(nuevo)delEntity('loan',nuevo);
+  if(nuevo){ // se corta el vínculo: si alguien lo restaura de la papelera, no duplica la deuda
+    delete nuevo.renovadoDe; delete nuevo.refinanciado; saveLoan(nuevo);
+    delEntity('loan',nuevo);
+  }
   go('prestamos',v.id);
   alert('Renovación deshecha ✅\nEl préstamo volvió a quedar activo con '+fmt$(loanRestante(v))+' pendientes.');
 }
@@ -1388,8 +1391,18 @@ function cumplimiento(clientId){
   else if(R.evaluables<5)R.nivel='poco';
   else if(R.pct>=80)R.nivel='bueno';
   else R.nivel='regular';
+  // el dueño puede fijarlo a mano: manda lo que él diga, pero se guarda lo que dice el sistema
+  R.nivelAuto=R.nivel;
+  const cl=client(clientId);
+  if(cl&&cl.nivelManual&&NIVEL[cl.nivelManual]){R.nivel=cl.nivelManual;R.manual=true;R.notaNivel=cl.nivelNota||'';}
   return R;
 }
+const NIVEL_AYUDA={
+  nuevo:'Todavía no hay con qué juzgarlo.',
+  poco :'Arrancó bien pero son pocas cuotas para asegurar nada.',
+  bueno:'Paga en término y no dejó cuotas colgadas.',
+  regular:'Paga, pero tarde: genera mora y hay que ir a buscarlo.',
+  malo :'Dejó cuotas sin pagar, hubo que acordar la deuda o cancelarla con saldo.'};
 const NIVEL={
   nuevo:{txt:'SIN HISTORIAL',col:'var(--muted)',ic:'🆕',cls:'niv-nuevo'},
   poco :{txt:'POCO HISTORIAL',col:'var(--blue)',ic:'🔎',cls:'niv-poco'},
@@ -1398,8 +1411,45 @@ const NIVEL={
   malo :{txt:'PROBLEMÁTICO',col:'var(--red)',ic:'🔴',cls:'niv-malo'}};
 // chapa de nivel, bien visible, para listas
 function chapaNivel(clientId){
-  const N=NIVEL[cumplimiento(clientId).nivel];
-  return `<span class="badge niv ${N.cls}">${N.ic} ${N.txt}</span>`;
+  const R=cumplimiento(clientId), N=NIVEL[R.nivel];
+  return `<span class="badge niv ${N.cls}">${N.ic} ${N.txt}${R.manual?' ✋':''}</span>`;
+}
+// el dueño fija el nivel a mano (o lo devuelve al automático)
+function formNivel(clientId){
+  const c=client(clientId); if(!c)return;
+  if(esSocio()&&c.gestorId!==SESSION.socioId)return alert('Este cliente no está asignado a tu cuenta.');
+  const R=cumplimiento(clientId), A=NIVEL[R.nivelAuto||'nuevo'];
+  modal(`<h3>🏷️ Cómo calificar a ${esc(c.nombre)}</h3>
+  <div class="hint">Por lo que ves en los pagos, el sistema lo califica solo como
+    <span class="badge niv ${A.cls}">${A.ic} ${A.txt}</span>. Si vos sabés algo que los números no dicen,
+    ponelo a mano: manda tu decisión y queda marcada con ✋.</div>
+  <label>Calificación</label>
+  <div class="list" style="padding:4px 0;margin-top:4px">
+    ${['bueno','regular','poco','malo','nuevo'].map(k=>{const N=NIVEL[k];
+      return `<div class="item" data-niv="${k}" style="padding:10px 12px">
+        <div class="ava" style="border-color:${N.col};color:${N.col}">${N.ic}</div>
+        <div class="mid"><div class="t1">${N.txt}${k===R.nivelAuto?' <span class="badge b-fut">lo que dice el sistema</span>':''}</div>
+          <div class="t2 libre">${NIVEL_AYUDA[k]}</div></div>
+        <div class="end">${(c.nivelManual===k)?'<span style="color:var(--green);font-weight:700">✓</span>':''}</div>
+      </div>`;}).join('')}
+  </div>
+  <label>Por qué (opcional)</label>
+  <input id="niv-nota" value="${esc(c.nivelNota||'')}" placeholder="ej: me consta que labura, se atrasó por la mudanza">
+  <button class="btn" id="niv-save" style="margin-top:16px">Guardar la calificación</button>
+  ${c.nivelManual?'<button class="btn sec" id="niv-auto" style="margin-top:10px">↩️ Volver a la calificación automática</button>':''}`);
+  let elegido=c.nivelManual||R.nivelAuto;
+  const pintar=()=>$$('[data-niv]').forEach(d=>{
+    d.style.background=d.dataset.niv===elegido?'var(--panel-2)':'';
+    d.querySelector('.end').innerHTML=d.dataset.niv===elegido?'<span style="color:var(--green);font-weight:700">✓</span>':'';});
+  $$('[data-niv]').forEach(d=>d.onclick=()=>{elegido=d.dataset.niv;pintar();});
+  pintar();
+  $('#niv-save').onclick=()=>{
+    c.nivelManual=elegido; c.nivelNota=$('#niv-nota').value.trim();
+    c.nivelT=Date.now(); c.nivelPor=nombreDeQuienMira()||'';
+    saveClient(c);closeModal();render();};
+  const a=$('#niv-auto');if(a)a.onclick=()=>{
+    delete c.nivelManual; delete c.nivelNota; delete c.nivelT; delete c.nivelPor;
+    saveClient(c);closeModal();render();};
 }
 function tiraHTML(tira,max){
   const t=tira.slice(-(max||20));
@@ -1422,7 +1472,12 @@ function resumenCumplimiento(clientId){
 }
 function vCumplimiento(clientId){
   const R=cumplimiento(clientId), N=NIVEL[R.nivel];
-  if(R.nivel==='nuevo')return '';
+  if(R.nivel==='nuevo'&&!R.manual)return `
+  <h2>📊 Cómo paga este cliente</h2>
+  <div class="list" style="padding:14px">
+    <div class="t2">🆕 Todavía no hay pagos como para calificarlo solo.
+      <span class="clip" data-nivel="${clientId}">🏷️ calificarlo a mano</span></div>
+  </div>`;
   const sub=(R.nivel==='regular'&&!R.problemas&&R.pct<60)?'paga siempre, pero tarde'
     :(R.nivel==='poco')?'todavía es pronto para calificarlo':'';
   const lineas=[];
@@ -1441,8 +1496,13 @@ function vCumplimiento(clientId){
   <div class="list" style="padding:0">
     <div class="veredicto" style="background:${N.col}">
       <span style="font-size:20px">${N.ic}</span>
-      <span class="vt">${N.txt}</span>
+      <span class="vt">${N.txt}${R.manual?' ✋':''}</span>
       ${sub?`<span class="vs">${sub}</span>`:''}
+    </div>
+    <div style="padding:10px 14px 0">
+      ${R.manual?`<div class="t2 libre" style="color:var(--blue)">✋ Calificación puesta a mano${R.notaNivel?': '+esc(R.notaNivel):''}.
+        Por los pagos, el sistema diría <b>${NIVEL[R.nivelAuto].txt}</b>.</div>`:''}
+      <div class="t2" style="margin-top:4px"><span class="clip" data-nivel="${clientId}">🏷️ ${R.manual?'cambiar o volver al automático':'calificarlo a mano'}</span></div>
     </div>
     <div style="padding:14px">
     <div class="t2">Le prestaste ${R.prestamos} ${R.prestamos===1?'vez':'veces'} · ${fmt$(R.nuevo)} de plata nueva${R.desde?` · desde ${dLong(R.desde)}`:''}</div>
@@ -1903,7 +1963,9 @@ function vPrestamo(id){
     <div class="t2">Fijada el ${dLong(ymd(new Date(l.acuerdo.t)))}${l.acuerdo.antes>l.acuerdo.monto?` · por sistema debía ${fmt$(l.acuerdo.antes)}`:''} · <b>la mora está frenada</b></div>
     ${(()=>{const cs=cuotasAcuerdo(l);if(!cs.length)return '';
       const pag=cs.filter(c=>cRestante(c)<=0).length, prox=cs.find(c=>cRestante(c)>0);
+      const distintos=cs.some(c=>c.monto!==cs[0].monto);
       return `<div class="t2">${cs.length===1?`Un solo pago de ${fmt$(cs[0].monto)}`
+        :distintos?`${cs.length} pagos ${FREQ_ADJ[l.acuerdo.frecuencia||'semanal']||''} de ${cs.map(c=>fmt$(c.monto)).join(' + ')}`
         :`${cs.length} pagos ${FREQ_ADJ[l.acuerdo.frecuencia||'semanal']||''} de ${fmt$(cs[0].monto)}`}
         · <b>${pag}/${cs.length} pagados</b>${prox?` · próximo ${dLong(prox.vence)}`:' · 🎉 plan completo'}</div>`;})()}
     ${l.acuerdo.nota?`<div class="t2">📝 ${esc(l.acuerdo.nota)}</div>`:''}
@@ -2574,10 +2636,13 @@ function balanceMes(y,m,ls){ // vista simple de caja del mes: cuánto salió y c
         const base=p.monto||0,mo=p.mora||0,co=p.cobrador||0;
         cobrado+=base+mo+co;baseC+=base;moraC+=mo;cobC+=co;nCobros++;
       }}));});
-  let prestado=0,nNuevos=0;
+  // OJO con el doble conteo: al renovar, el saldo que se refinancia se registra como COBRADO
+  // (son cuotas que se dan por pagadas). Si acá además lo restáramos de lo prestado, el mismo
+  // peso contaría dos veces y el neto del mes saldría inflado. Por eso va el monto completo.
+  let prestado=0,nNuevos=0,refin=0;
   base.forEach(l=>{if(!l.createdAt)return;const d=new Date(l.createdAt);
-    if(d.getFullYear()===y&&d.getMonth()===m){prestado+=Math.max(0,(l.monto||0)-(l.refinanciado||0));nNuevos++;}});
-  return {cobrado,baseC,moraC,cobC,nCobros,prestado,nNuevos,neto:cobrado-prestado};
+    if(d.getFullYear()===y&&d.getMonth()===m){prestado+=(l.monto||0);refin+=(l.refinanciado||0);nNuevos++;}});
+  return {cobrado,baseC,moraC,cobC,nCobros,prestado,refin,nNuevos,neto:cobrado-prestado};
 }
 // filtros por gestor: todo / solo lo mío (sin socio) / el de un socio
 function pasaGestor(l,g){
@@ -2654,6 +2719,7 @@ function vCalendario(){
       <div><div class="bn" style="color:${netoColor}">${b.neto<0?'-':''}${fmt$(Math.abs(b.neto))}</div><div class="bl">neto ganado</div></div>
     </div>
     ${b.cobrado>0?`<div class="t2" style="margin-top:8px">Desglose cobrado: cuotas ${fmt$(b.baseC)} · mora ${fmt$(b.moraC)} · cobrador ${fmt$(b.cobC)}</div>`:''}
+    ${b.refin>0?`<div class="t2">De lo prestado, ${fmt$(b.refin)} fue saldo refinanciado de renovaciones: de la mano salieron ${fmt$(b.prestado-b.refin)}.</div>`:''}
     ${b.cobrado===0&&b.prestado===0?'<div class="t2" style="margin-top:8px;font-style:italic">Sin movimientos en este mes.</div>':''}
   </div>`;
   return `
@@ -3356,7 +3422,7 @@ function formRenovar(viejoId){
     if(!mm||mm<=0)return alert('Poné el monto del nuevo préstamo');
     if(!n||n<1)return alert('Poné la cantidad de cuotas');
     if(!ini)return alert('Elegí la fecha del primer cobro');
-    const dd=conDesc()?DR.desc:0;
+    const dd=conDesc()?descuentoRenovacion(v).desc:0;  // recalculado recién ahora, no al abrir
     const refin=saldar?saldo-dd:0;
     if(saldar&&mm<refin&&!confirm('El monto nuevo ('+fmt$(mm)+') es menor que el saldo pendiente ('+fmt$(refin)+'). El cliente no recibiría plata. ¿Continuar igual?'))return;
     const total=Math.round(mm*(1+i/100));
@@ -3403,6 +3469,9 @@ function formAcuerdo(loanId){
   </div>
   <label id="ac-lblvence">¿Para cuándo?</label>
   <input id="ac-vence" type="date" value="${ya&&l.acuerdo.vence?l.acuerdo.vence:todayStr()}">
+  <label class="chk" id="ac-libresbox" style="display:none;border-color:var(--line)">
+    <input type="checkbox" id="ac-libres" ${ya&&l.acuerdo.montos?'checked':''}><span>Que las cuotas sean de distinto valor</span></label>
+  <div id="ac-montos" style="display:none"></div>
   <label>Nota (opcional)</label>
   <input id="ac-nota" placeholder="ej: acordado por teléfono, paga en 2 veces" value="${ya?esc(l.acuerdo.nota||''):''}">
   <div class="resume" id="ac-plan" style="display:none"></div>
@@ -3410,8 +3479,29 @@ function formAcuerdo(loanId){
   <button class="btn" id="ac-save" style="margin-top:16px">🤝 ${ya?'Actualizar el acuerdo':'Fijar la deuda'}</button>
   ${ya?'<button class="btn red sec" id="ac-quitar" style="margin-top:10px">↩️ Quitar el acuerdo y volver al cronograma original</button>':''}`);
   let acFreq=ya?(l.acuerdo.frecuencia||'semanal'):'semanal';
+  let libres=ya&&Array.isArray(l.acuerdo.montos)?l.acuerdo.montos.slice():null; // montos a mano
   const nCuotas=()=>Math.max(1,Math.min(200,Math.round(+$('#ac-n').value||1)));
   const skipDom=()=>acFreq==='diaria'&&$('#ac-dom').checked;
+  const aMano=()=>nCuotas()>1&&$('#ac-libres')&&$('#ac-libres').checked;
+  // dibuja un casillero por cuota, con su fecha al lado
+  const pintarMontos=(fechas,iguales)=>{
+    const cont=$('#ac-montos'); if(!cont)return;
+    if(!aMano()){cont.style.display='none';cont.innerHTML='';return;}
+    if(!libres||libres.length!==fechas.length)libres=iguales.slice();
+    cont.style.display='';
+    cont.innerHTML=`<label style="margin-top:14px">Monto de cada cuota</label>`
+      +fechas.map((f,i)=>`<div class="frow" style="align-items:center;gap:8px;margin-top:6px">
+        <div style="flex:0 0 108px;font-size:12px;color:var(--muted)">${i+1}. ${dShort(f)}</div>
+        <div style="flex:1"><input type="number" inputmode="decimal" data-acm="${i}" value="${libres[i]}"></div>
+      </div>`).join('')
+      +`<div class="hint" id="ac-suma"></div>`;
+    $$('[data-acm]').forEach(inp=>inp.oninput=()=>{
+      libres[+inp.dataset.acm]=Math.round(+inp.value||0);
+      const suma=libres.reduce((a,x)=>a+(+x||0),0);
+      $('#ac-monto').value=suma;      // el total sigue a la suma de las cuotas
+      upd();
+    });
+  };
   const upd=()=>{
     const m=+$('#ac-monto').value||0, n=nCuotas();
     $('#ac-dif').innerHTML=!m?'Poné el monto total que acordaste que te va a pagar.'
@@ -3424,24 +3514,37 @@ function formAcuerdo(loanId){
     const plan=$('#ac-plan');
     if(!m||n<1){plan.style.display='none';return;}
     const cs=genCuotas(Math.round(m),n,acFreq,$('#ac-vence').value||todayStr(),skipDom());
+    $('#ac-libresbox').style.display=n>1?'':'none';
+    pintarMontos(cs.map(c=>c.vence),cs.map(c=>c.monto));
+    const montos=aMano()?libres.map(x=>Math.round(+x||0)):cs.map(c=>c.monto);
+    const suma=montos.reduce((a,x)=>a+x,0);
+    if(aMano()){const sm=$('#ac-suma');
+      if(sm)sm.innerHTML=`Suma de las ${n} cuotas: <b>${fmt$(suma)}</b>`
+        +(suma<=0?' <span style="color:var(--red)">· poné los montos</span>':'');}
     plan.style.display='';
     plan.innerHTML=n===1
-      ? `Un solo pago de <b>${fmt$(cs[0].monto)}</b> el ${dLong(cs[0].vence)}.`
-      : `<b>${n} pagos ${FREQ_ADJ[acFreq]||''}</b> de ${fmt$(cs[0].monto)}${cs[n-1].monto!==cs[0].monto?` (el último ${fmt$(cs[n-1].monto)})`:''}<br>
-         <span style="font-size:12px">del ${dShort(cs[0].vence)} al ${dShort(cs[n-1].vence)} · sin mora, pero con recordatorio cada vez</span>`;
+      ? `Un solo pago de <b>${fmt$(montos[0])}</b> el ${dLong(cs[0].vence)}.`
+      : (aMano()
+        ? `<b>${n} pagos ${FREQ_ADJ[acFreq]||''}</b> por <b>${fmt$(suma)}</b> en total:<br>
+           <span style="font-size:12px">${montos.map((x,i)=>`${dShort(cs[i].vence)} ${fmt$(x)}`).join(' · ')}<br>sin mora, pero con recordatorio cada vez</span>`
+        : `<b>${n} pagos ${FREQ_ADJ[acFreq]||''}</b> de ${fmt$(montos[0])}${montos[n-1]!==montos[0]?` (el último ${fmt$(montos[n-1])})`:''}<br>
+           <span style="font-size:12px">del ${dShort(cs[0].vence)} al ${dShort(cs[n-1].vence)} · sin mora, pero con recordatorio cada vez</span>`);
   };
-  $('#ac-monto').oninput=upd;
-  $('#ac-n').oninput=upd;
+  $('#ac-monto').oninput=()=>{libres=null;upd();};   // si cambia el total, se reparte de nuevo
+  $('#ac-n').oninput=()=>{libres=null;upd();};
+  $('#ac-libres').onchange=()=>{libres=null;upd();};
   $('#ac-vence').onchange=upd;
   $('#ac-dom').onchange=upd;
   $$('#ac-freq button').forEach(b=>b.onclick=()=>{acFreq=b.dataset.v;
     $$('#ac-freq button').forEach(x=>x.classList.toggle('on',x===b));upd();});
   upd();
   $('#ac-save').onclick=()=>{
-    const m=+$('#ac-monto').value;
+    const n=nCuotas(), montos=aMano()?libres.map(x=>Math.round(+x||0)):null;
+    if(montos&&montos.some(x=>x<=0))return alert('Hay cuotas en cero. Poné el monto de cada una.');
+    const m=montos?montos.reduce((a,x)=>a+x,0):+$('#ac-monto').value;
     if(!m||m<0)return alert('Poné el monto acordado');
     const v=$('#ac-vence').value||todayStr();
-    aplicarAcuerdo(l,Math.round(m),v,$('#ac-nota').value.trim(),hoyDebe,nCuotas(),acFreq,skipDom());
+    aplicarAcuerdo(l,Math.round(m),v,$('#ac-nota').value.trim(),hoyDebe,n,acFreq,skipDom(),montos);
     closeModal();render();
     alert('Deuda acordada ✅\n'+esc(cl.nombre)+' queda debiendo '+fmt$(loanRestante(l))+'.\nLa mora dejó de correr.');
   };
@@ -3450,7 +3553,7 @@ function formAcuerdo(loanId){
     quitarAcuerdo(l);closeModal();render();
   };
 }
-function aplicarAcuerdo(l,monto,vence,nota,deudaAntes,nPagos,freq,skipDom){
+function aplicarAcuerdo(l,monto,vence,nota,deudaAntes,nPagos,freq,skipDom,montos){
   if(!l.acuerdo){ // guardamos el cronograma original una sola vez, para poder volver
     l.acuerdoPrev={cuotas:JSON.parse(JSON.stringify(l.cuotas)),total:l.total,status:l.status};
   }
@@ -3466,8 +3569,10 @@ function aplicarAcuerdo(l,monto,vence,nota,deudaAntes,nPagos,freq,skipDom){
   // el plan acordado: una o varias cuotas, con su frecuencia. Congeladas = sin mora,
   // pero con fecha propia, así entran en recordatorios, cobros del día y calendario.
   const nn=Math.max(1,Math.round(nPagos||1)), f=freq||'semanal';
+  const aMano=Array.isArray(montos)&&montos.length===nn&&montos.every(x=>+x>0);
   const nuevas=genCuotas(monto,nn,f,vence,f==='diaria'&&!!skipDom)
-    .map(c=>({n:n++,vence:c.vence,monto:c.monto,pagos:[],congelada:true,esAcuerdo:true}));
+    .map((c,i)=>({n:n++,vence:c.vence,monto:aMano?Math.round(+montos[i]):c.monto,
+      pagos:[],congelada:true,esAcuerdo:true}));
   let idx=0;
   pagosPrevios.forEach(p=>{
     let resto=p.monto||0, primero=true;
@@ -3487,6 +3592,7 @@ function aplicarAcuerdo(l,monto,vence,nota,deudaAntes,nPagos,freq,skipDom){
   l.total=cobradoBase+monto;
   l.acuerdo={monto,vence,nota:nota||'',t:Date.now(),antes:deudaAntes??monto,
     cuotas:nn,frecuencia:f,skipDom:!!(f==='diaria'&&skipDom)};
+  if(aMano)l.acuerdo.montos=montos.map(x=>Math.round(+x));
   saveLoan(l);
 }
 // las cuotas del plan acordado, en orden (para numerarlas 1/3, 2/3… en avisos y pantallas)
@@ -4299,6 +4405,7 @@ function bindView(){
   $$('[data-cal]').forEach(b=>b.onclick=()=>{calRef=new Date(calRef.getFullYear(),calRef.getMonth()+ +b.dataset.cal,1);render();});
   $$('[data-day]').forEach(b=>b.onclick=()=>{calSel=b.dataset.day;render();});
   $$('[data-edit-cli]').forEach(b=>b.onclick=()=>formCliente(b.dataset.editCli));
+  $$('[data-nivel]').forEach(b=>b.onclick=e=>{e.stopPropagation();formNivel(b.dataset.nivel);});
   $$('[data-new-loan]').forEach(b=>b.onclick=()=>formPrestamo(b.dataset.newLoan));
   $$('[data-new-contrato]').forEach(b=>b.onclick=()=>formContratoPrevio(b.dataset.newContrato));
   $$('[data-wa]').forEach(b=>b.onclick=()=>{
