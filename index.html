@@ -345,7 +345,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=94; // mantener a la par del número de caché en sw.js
+const APP_VER=95; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -3483,23 +3483,31 @@ function formAcuerdo(loanId){
   const nCuotas=()=>Math.max(1,Math.min(200,Math.round(+$('#ac-n').value||1)));
   const skipDom=()=>acFreq==='diaria'&&$('#ac-dom').checked;
   const aMano=()=>nCuotas()>1&&$('#ac-libres')&&$('#ac-libres').checked;
-  // dibuja un casillero por cuota, con su fecha al lado
+  // dibuja un casillero por cuota, con su fecha al lado.
+  // OJO: solo se rehacen cuando cambia la estructura (cantidad de cuotas, fechas, o el total
+  // escrito arriba). Si se redibujaran a cada tecla, el casillero en el que estás escribiendo
+  // se destruiría y perdería el foco: se cerraba el teclado después de cada número.
+  let firmaMontos='';
+  const pesos=v=>Math.round(+String(v||'').replace(/\D/g,'')||0); // acepta 210000, 210.000 o $210.000
   const pintarMontos=(fechas,iguales)=>{
     const cont=$('#ac-montos'); if(!cont)return;
-    if(!aMano()){cont.style.display='none';cont.innerHTML='';return;}
-    if(!libres||libres.length!==fechas.length)libres=iguales.slice();
+    if(!aMano()){cont.style.display='none';cont.innerHTML='';firmaMontos='';return;}
+    if(!libres||libres.length!==fechas.length){libres=iguales.slice();firmaMontos='';}
     cont.style.display='';
+    const firma=fechas.join('|');
+    if(firma===firmaMontos&&cont.querySelector('[data-acm]'))return; // ya están: no tocar mientras escribe
+    firmaMontos=firma;
     cont.innerHTML=`<label style="margin-top:14px">Monto de cada cuota</label>`
       +fechas.map((f,i)=>`<div class="frow" style="align-items:center;gap:8px;margin-top:6px">
         <div style="flex:0 0 108px;font-size:12px;color:var(--muted)">${i+1}. ${dShort(f)}</div>
-        <div style="flex:1"><input type="number" inputmode="decimal" data-acm="${i}" value="${libres[i]}"></div>
+        <div style="flex:1"><input type="text" inputmode="numeric" autocomplete="off" data-acm="${i}" value="${libres[i]}"></div>
       </div>`).join('')
       +`<div class="hint" id="ac-suma"></div>`;
     $$('[data-acm]').forEach(inp=>inp.oninput=()=>{
-      libres[+inp.dataset.acm]=Math.round(+inp.value||0);
+      libres[+inp.dataset.acm]=pesos(inp.value);
       const suma=libres.reduce((a,x)=>a+(+x||0),0);
       $('#ac-monto').value=suma;      // el total sigue a la suma de las cuotas
-      upd();
+      upd();                          // refresca el resumen sin rehacer los casilleros
     });
   };
   const upd=()=>{
