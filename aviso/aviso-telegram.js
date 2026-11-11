@@ -71,8 +71,21 @@ async function leerIndex(){
 // ---------- datos desde Firebase ----------
 async function leerDatos(){
   if(process.env.DATOS_JSON)return JSON.parse(fs.readFileSync(process.env.DATOS_JSON,'utf8'));
-  const {FIREBASE_API_KEY:key,FIREBASE_PROJECT_ID:proj,NEGOCIO_CODIGO:cod}=process.env;
+  // Los valores se suelen copiar del bloque de configuración tal cual: con comillas, la coma del
+  // final o el "projectId:" adelante. Se limpian solos; en el registro solo se dice QUÉ se limpió.
+  const limpiar=(nombre,v)=>{
+    const orig=String(v||''); let x=orig.trim();
+    x=x.replace(/^[A-Za-z_]+\s*:\s*/,'');           // projectId: "…"
+    x=x.replace(/[,;]+$/,'').trim();                   // coma o punto y coma final
+    x=x.replace(/^["'`]+|["'`]+$/g,'').trim();         // comillas
+    if(nombre==='FIREBASE_PROJECT_ID')x=x.replace(/\.firebaseapp\.com$/,'').replace(/\.web\.app$/,'');
+    if(x!==orig)console.log(nombre+': tenía caracteres de más (comillas, coma, espacios o prefijo), los saqué.');
+    return x;};
+  const key=limpiar('FIREBASE_API_KEY',process.env.FIREBASE_API_KEY);
+  const proj=limpiar('FIREBASE_PROJECT_ID',process.env.FIREBASE_PROJECT_ID);
+  const cod=limpiar('NEGOCIO_CODIGO',process.env.NEGOCIO_CODIGO);
   if(!key||!proj||!cod)throw new Error('faltan FIREBASE_API_KEY, FIREBASE_PROJECT_ID o NEGOCIO_CODIGO');
+  if(/^\d+$/.test(proj))throw new Error('FIREBASE_PROJECT_ID es un número: ese es el messagingSenderId, no el projectId (es el texto tipo mi-proyecto-1234)');
   const base=`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(proj)}/databases/(default)/documents/negocios/${encodeURIComponent(cod)}`;
   // si la clave de Firebase está restringida a la página de la app, Google mira de dónde viene el pedido
   const H={'Content-Type':'application/json','Referer':APP_URL};
@@ -147,7 +160,8 @@ function armarMensaje(r){
 }
 
 async function mandar(texto){
-  const {TELEGRAM_TOKEN:tok,TELEGRAM_CHAT_ID:chat}=process.env;
+  const tok=String(process.env.TELEGRAM_TOKEN||'').trim().replace(/^["'`]+|["'`]+$/g,'').replace(/^bot/,'');
+  const chat=String(process.env.TELEGRAM_CHAT_ID||'').trim().replace(/^["'`]+|["'`]+$/g,'');
   if(!tok||!chat)throw new Error('faltan TELEGRAM_TOKEN o TELEGRAM_CHAT_ID');
   const r=await fetch(`https://api.telegram.org/bot${tok}/sendMessage`,{method:'POST',
     headers:{'Content-Type':'application/json'},
