@@ -142,7 +142,9 @@ function calcular({settings,clients,loans},L){
   }
   hoyItems.sort((a,b)=>a.cliente.localeCompare(b.cliente));
   const vencidos=[...venc.values()].sort((a,b)=>a.desde<b.desde?-1:a.desde>b.desde?1:b.total-a.total);
-  return {hoy,hoyItems,vencidos,nombre:settings.nombreDueno||''};
+  const conteo={clientes:clients.length,prestamos:loans.length,
+    activos:loans.filter(l=>!l.deleted&&l.status==='activo').length,mios:mios.length};
+  return {hoy,hoyItems,vencidos,nombre:settings.nombreDueno||'',conteo};
 }
 
 function armarMensaje(r){
@@ -196,6 +198,8 @@ async function mandar(texto){
     if(PRUEBA){console.log(JSON.stringify({version,hoy:r.hoy,hoyItems:r.hoyItems,vencidos:r.vencidos}));
       console.log('---MENSAJE---\n'+texto);return;}
     await mandar(texto);
+    const k=r.conteo;
+    console.log(`Leí ${k.clientes} clientes y ${k.prestamos} préstamos (${k.activos} activos, ${k.mios} activos sin socio).`);
     console.log(`Aviso enviado (app v${version}): ${r.hoyItems.length} cobros de hoy, ${r.vencidos.length} clientes vencidos.`);
   }catch(e){
     console.error('No se pudo armar el aviso: '+e.message);
