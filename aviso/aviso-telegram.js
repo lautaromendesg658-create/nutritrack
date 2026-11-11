@@ -74,21 +74,26 @@ async function leerDatos(){
   const {FIREBASE_API_KEY:key,FIREBASE_PROJECT_ID:proj,NEGOCIO_CODIGO:cod}=process.env;
   if(!key||!proj||!cod)throw new Error('faltan FIREBASE_API_KEY, FIREBASE_PROJECT_ID o NEGOCIO_CODIGO');
   const base=`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(proj)}/databases/(default)/documents/negocios/${encodeURIComponent(cod)}`;
+  // si la clave de Firebase está restringida a la página de la app, Google mira de dónde viene el pedido
+  const H={'Content-Type':'application/json','Referer':APP_URL};
+  // el motivo que da Google cuando rechaza (no trae datos de clientes, se puede mostrar)
+  const motivo=async r=>{try{const j=await r.json();const e=j.error||(j[0]&&j[0].error)||{};
+    return `${r.status} ${e.status||''} ${e.message||''}`.trim();}catch(_){return String(r.status);}};
   // solo clientes y préstamos: los documentos (fotos) pesan mucho y no hacen falta
   const r=await fetch(`${base}:runQuery?key=${encodeURIComponent(key)}`,{method:'POST',
-    headers:{'Content-Type':'application/json'},
+    headers:H,
     body:JSON.stringify({structuredQuery:{from:[{collectionId:'items'}],
       where:{fieldFilter:{field:{fieldPath:'kind'},op:'IN',
         value:{arrayValue:{values:[{stringValue:'client'},{stringValue:'loan'}]}}}}}})});
-  if(!r.ok)throw new Error('Firebase respondió '+r.status+' al leer los préstamos');
+  if(!r.ok)throw new Error('Firebase rechazó leer los préstamos: '+await motivo(r));
   const filas=await r.json(), clients=[], loans=[];
   for(const f of filas){
     const d=f.document; if(!d||!d.fields||!d.fields.json)continue;
     let ent; try{ent=JSON.parse(d.fields.json.stringValue);}catch(e){continue;}
     (d.fields.kind.stringValue==='client'?clients:loans).push(ent);
   }
-  const rs=await fetch(`${base}/meta/settings?key=${encodeURIComponent(key)}`);
-  if(!rs.ok)throw new Error('Firebase respondió '+rs.status+' al leer los ajustes');
+  const rs=await fetch(`${base}/meta/settings?key=${encodeURIComponent(key)}`,{headers:H});
+  if(!rs.ok)throw new Error('Firebase rechazó leer los ajustes: '+await motivo(rs));
   const sd=await rs.json();
   const settings=JSON.parse(sd.fields.json.stringValue);
   return {settings,clients,loans};
