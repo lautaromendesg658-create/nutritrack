@@ -85,7 +85,14 @@ async function leerDatos(){
   const proj=limpiar('FIREBASE_PROJECT_ID',process.env.FIREBASE_PROJECT_ID);
   const cod=limpiar('NEGOCIO_CODIGO',process.env.NEGOCIO_CODIGO);
   if(!key||!proj||!cod)throw new Error('faltan FIREBASE_API_KEY, FIREBASE_PROJECT_ID o NEGOCIO_CODIGO');
-  if(/^\d+$/.test(proj))throw new Error('FIREBASE_PROJECT_ID es un número: ese es el messagingSenderId, no el projectId (es el texto tipo mi-proyecto-1234)');
+  // revisión de FORMATO, sin mostrar los valores (el registro es público)
+  if(/^\d+$/.test(proj))throw new Error('FIREBASE_PROJECT_ID es un número: ese es el messagingSenderId. El projectId es un texto tipo mi-proyecto-1234');
+  if(/^AIza/.test(proj))throw new Error('en FIREBASE_PROJECT_ID está la apiKey: van cambiados');
+  if(proj.includes(':'))throw new Error('FIREBASE_PROJECT_ID parece el appId (tiene ":"). El projectId es un texto tipo mi-proyecto-1234');
+  if(proj.includes('.'))throw new Error('FIREBASE_PROJECT_ID tiene un punto: parece el authDomain o el storageBucket. Es solo la parte antes del primer punto');
+  if(!/^[a-z0-9-]{4,40}$/.test(proj))throw new Error('FIREBASE_PROJECT_ID no tiene forma de projectId (solo minúsculas, números y guiones)');
+  if(!/^AIza[0-9A-Za-z_-]{35}$/.test(key))throw new Error('FIREBASE_API_KEY no tiene forma de apiKey (empieza con AIza y tiene 39 caracteres)');
+  console.log('Formato de las claves de Firebase: ok.');
   const base=`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(proj)}/databases/(default)/documents/negocios/${encodeURIComponent(cod)}`;
   // si la clave de Firebase está restringida a la página de la app, Google mira de dónde viene el pedido
   const H={'Content-Type':'application/json','Referer':APP_URL};
