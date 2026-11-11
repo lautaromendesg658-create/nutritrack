@@ -1,0 +1,5 @@
+{
+  "name": "prestacontrol-tests",
+  "private": true,
+  "dependencies": { "playwright-core": "*" }
+}

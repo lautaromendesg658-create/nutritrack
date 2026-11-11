@@ -1,0 +1,25 @@
+name: Aviso diario por Telegram
+
+on:
+  schedule:
+    - cron: '0 12 * * *'   # 12:00 UTC = 9:00 en Argentina. GitHub puede demorarlo unos minutos.
+  workflow_dispatch: {}     # botón "Run workflow" para probarlo a mano
+
+jobs:
+  avisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Mandar el aviso
+        run: node aviso/aviso-telegram.js
+        env:
+          TZ: America/Argentina/Buenos_Aires
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          NEGOCIO_CODIGO: ${{ secrets.NEGOCIO_CODIGO }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
