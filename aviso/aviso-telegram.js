@@ -173,7 +173,13 @@ async function mandar(texto){
   const r=await fetch(`https://api.telegram.org/bot${tok}/sendMessage`,{method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({chat_id:chat,text:texto,parse_mode:'HTML',disable_web_page_preview:true})});
-  if(!r.ok)throw new Error('Telegram respondió '+r.status);
+  if(!r.ok){ // Telegram explica el motivo ("chat not found", "Unauthorized"…): no trae datos, se puede mostrar
+    let d=''; try{d=(await r.json()).description||'';}catch(_){}
+    const ayuda=/Unauthorized|Not Found/i.test(d)?' → el TELEGRAM_TOKEN está mal o incompleto'
+      :/chat not found/i.test(d)?' → el TELEGRAM_CHAT_ID está mal, o no apretaste Iniciar en el chat con tu bot'
+      :/blocked|can't initiate|initiate conversation/i.test(d)?' → falta apretar Iniciar en el chat con tu bot':'';
+    throw new Error('Telegram respondió '+r.status+' '+d+ayuda);
+  }
 }
 
 (async()=>{
@@ -187,7 +193,8 @@ async function mandar(texto){
     console.log(`Aviso enviado (app v${version}): ${r.hoyItems.length} cobros de hoy, ${r.vencidos.length} clientes vencidos.`);
   }catch(e){
     console.error('No se pudo armar el aviso: '+e.message);
-    if(!PRUEBA)try{await mandar('⚠️ <b>No pude armar el aviso de cobros de hoy.</b>\nAbrí la app para ver tus cobros. (Motivo: '+html(e.message)+')');}catch(_){}
+    if(!PRUEBA)try{await mandar('⚠️ <b>No pude armar el aviso de cobros de hoy.</b>\nAbrí la app para ver tus cobros. (Motivo: '+html(e.message)+')');}
+      catch(e2){console.error('Tampoco pude avisar por Telegram: '+e2.message);}
     process.exit(1);
   }
 })();
