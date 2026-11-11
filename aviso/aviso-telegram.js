@@ -167,7 +167,13 @@ function armarMensaje(r){
 }
 
 async function mandar(texto){
-  const tok=String(process.env.TELEGRAM_TOKEN||'').trim().replace(/^["'`]+|["'`]+$/g,'').replace(/^bot/,'');
+  // el token tiene forma 1234567890:AAH…; si se pegó con texto alrededor (la frase de BotFather,
+  // el link de la API, espacios), se rescata de adentro
+  const crudo=String(process.env.TELEGRAM_TOKEN||'');
+  const hallado=crudo.match(/\d{6,12}:[A-Za-z0-9_-]{30,}/);
+  if(!hallado)throw new Error('TELEGRAM_TOKEN no tiene forma de token (números, dos puntos y un texto largo, como 7412345678:AAHk…)');
+  const tok=hallado[0];
+  if(tok!==crudo.trim())console.log('TELEGRAM_TOKEN: tenía texto de más alrededor, usé solo el token.');
   const chat=String(process.env.TELEGRAM_CHAT_ID||'').trim().replace(/^["'`]+|["'`]+$/g,'');
   if(!tok||!chat)throw new Error('faltan TELEGRAM_TOKEN o TELEGRAM_CHAT_ID');
   const r=await fetch(`https://api.telegram.org/bot${tok}/sendMessage`,{method:'POST',
