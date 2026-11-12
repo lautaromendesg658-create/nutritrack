@@ -1,6 +1,6 @@
 # Aviso diario por Telegram
 
-Todos los días a las 9 (hora de Argentina) te llega por Telegram la lista de cobros de hoy y
+Todos los días a la mañana (entre las 8:47 y las 9:47, hora de Argentina) te llega por Telegram la lista de cobros de hoy y
 los vencidos de **tus** clientes: los préstamos activos sin socio, igual que el filtro "Míos".
 
 - Lo corre GitHub Actions (`.github/workflows/aviso-telegram.yml`), gratis.
@@ -25,6 +25,8 @@ GitHub → Actions → "Aviso diario por Telegram" → Run workflow.
 ## Ojo
 
 - GitHub solo corre tareas programadas desde la rama `main`.
+- GitHub demora o descarta tareas programadas en hora pico, así que hay tres intentos
+  (8:47, 9:17 y 9:47). El primero que corre manda el aviso; los otros no mandan nada.
 - En repositorios públicos, si pasan 60 días sin cambios GitHub pausa la tarea y manda un
   mail; se reactiva con un clic.
 - Si algo falla, te llega igual un mensaje avisando que no se pudo armar.

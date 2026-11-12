@@ -190,8 +190,26 @@ async function mandar(texto){
   }
 }
 
+// ¿Ya salió el aviso de hoy? Hay varios intentos programados por si GitHub descarta alguno:
+// el que llega después de uno exitoso no manda nada. Si no se puede averiguar, manda igual
+// (mejor un aviso repetido que ninguno). Las pruebas a mano no cuentan ni se frenan.
+async function yaSalioHoy(){
+  const {GITHUB_EVENT_NAME:ev,GITHUB_TOKEN:tok,GITHUB_REPOSITORY:repo,GITHUB_WORKFLOW_REF:wf}=process.env;
+  if(ev!=='schedule'||!tok||!repo)return false;
+  try{
+    const archivo=(wf||'').split('@')[0].split('/').pop()||'aviso-telegram.yml';
+    const hoyUTC=new Date().toISOString().slice(0,10);
+    const r=await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${archivo}/runs?event=schedule&status=success&created=%3E%3D${hoyUTC}&per_page=5`,
+      {headers:{Authorization:'Bearer '+tok,Accept:'application/vnd.github+json'}});
+    if(!r.ok)return false;
+    const j=await r.json();
+    return (j.workflow_runs||[]).some(x=>String(x.id)!==String(process.env.GITHUB_RUN_ID));
+  }catch(e){return false;}
+}
+
 (async()=>{
   try{
+    if(await yaSalioHoy()){console.log('El aviso de hoy ya salió en un intento anterior: no mando nada.');return;}
     const datos=await leerDatos();
     const {L,version}=cargarLogica(await leerIndex(),datos.settings);
     const r=calcular(datos,L), texto=armarMensaje(r);
