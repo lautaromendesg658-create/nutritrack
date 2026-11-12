@@ -2,8 +2,21 @@ name: Aviso diario por Telegram
 
 on:
   schedule:
-    - cron: '0 12 * * *'   # 12:00 UTC = 9:00 en Argentina. GitHub puede demorarlo unos minutos.
-  workflow_dispatch: {}     # botón "Run workflow" para probarlo a mano
+    # GitHub demora o descarta tareas programadas en punto (hora pico), así que hay tres
+    # intentos fuera del pico. El primero que corre manda el aviso; los otros ven que ya
+    # salió y no mandan nada. Horas en UTC: 11:47, 12:17 y 12:47 = 8:47, 9:17 y 9:47 en Argentina.
+    - cron: '47 11 * * *'
+    - cron: '17 12 * * *'
+    - cron: '47 12 * * *'
+  workflow_dispatch: {}     # botón "Run workflow" para probarlo a mano (siempre manda)
+
+permissions:
+  contents: read
+  actions: read             # para ver si el aviso de hoy ya salió
+
+concurrency:
+  group: aviso-telegram     # nunca dos al mismo tiempo
+  cancel-in-progress: false
 
 jobs:
   avisar:
@@ -18,6 +31,7 @@ jobs:
         run: node aviso/aviso-telegram.js
         env:
           TZ: America/Argentina/Buenos_Aires
+          GITHUB_TOKEN: ${{ github.token }}
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           NEGOCIO_CODIGO: ${{ secrets.NEGOCIO_CODIGO }}
