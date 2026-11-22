@@ -345,7 +345,7 @@
 <script>
 /* ================= ESTADO ================= */
 const LS='prestacontrol-v1';
-const APP_VER=95; // mantener a la par del número de caché en sw.js
+const APP_VER=96; // mantener a la par del número de caché en sw.js
 const DEF_REC={
   hoy:'Hola {nombre}! Te recordamos que HOY vence tu cuota {cuota} de {monto}, a abonar antes de las {hora} hs al alias {alias}. ¡Gracias! — {negocio}',
   manana:'Hola {nombre}! Te recordamos que mañana ({fecha}) vence tu cuota {cuota} de {monto}. Podés abonar al alias {alias}. ¡Gracias! — {negocio}',
@@ -550,6 +550,7 @@ function loanSobrepago(l){ // lo cobrado por encima del valor de las cuotas
    capital + gastos, la diferencia la pone el dueño; el socio nunca pone plata. */
 function loanGastos(l){return (l.gastos||[]).reduce((a,g)=>a+(+g.monto||0),0);}
 function loanGananciaProyectada(l){ // interés + extras cobrados + lo pagado de más − descuentos − gastos
+  if(l.status==='cerrado')return loanNetoRealizado(l); // cerrado: lo que dio, aunque sea pérdida
   return loanGanancia(l)+loanExtrasCobrados(l)+loanSobrepago(l)-loanDescuentos(l)-loanGastos(l);
 }
 function loanTotalCobrado(l){ // todo lo cobrado del préstamo: cuotas + mora + cobrador
@@ -641,6 +642,13 @@ function loanReparto(l){ // devuelve {socioNom, socioPct, miPct, gananciaTotal, 
   const sp=Math.max(0,Math.min(100,l.gestorPct)), mp=100-sp;
   const nom=socioNombre(l.gestorId)||l.gestorNombre||'Socio';
   const previa=gananciaPrevia(l);                       // ganancia ya hecha antes del traspaso
+  if(l.status==='cerrado'&&l.cierre&&l.cierre.parteSocio!=null){
+    // cerrado como estaba: la parte del socio se calculó sobre el TOTAL del lote (ver planCierre)
+    const s=Math.max(0,Math.round(l.cierre.parteSocio));
+    return {compartido:true, socioNom:nom, socioPct:sp, miPct:mp, gananciaTotal:g, previa,
+      gastos:loanGastos(l), desde:l.gestorDesde||0, cerrado:true,
+      socioParteTotal:s, miParteTotal:g-s, socioParteReal:s, miParteReal:gr-s};
+  }
   // lo que sí se reparte: la ganancia neta de gastos, menos la que ya estaba hecha antes
   const gComp=Math.max(0,g-previa), grComp=Math.max(0,loanNetoRealizado(l)-previa);
   const socioParteTotal=Math.round(gComp*sp/100), socioParteReal=Math.round(grComp*sp/100);
@@ -649,8 +657,59 @@ function loanReparto(l){ // devuelve {socioNom, socioPct, miPct, gananciaTotal, 
     socioParteTotal, miParteTotal:g-socioParteTotal,
     socioParteReal, miParteReal:gr-socioParteReal};
 }
+/* ----- CERRAR COMO ESTÁ -----
+   Se termina el préstamo con lo cobrado hasta hoy. Ganancia de cada uno = cobrado − capital −
+   gastos (menos la hecha antes de que el socio lo tomara). Si se cierran varios del MISMO socio
+   juntos, se reparte sobre el TOTAL: las pérdidas de unos se descuentan de las ganancias de otros
+   antes de repartir. Si el total da pérdida, el socio no cobra y no pone nada. Solo el dueño. */
+function planCierre(ids){
+  const ls=ids.map(id=>loan(id)).filter(l=>l&&l.status==='activo');
+  const grupos=new Map();
+  ls.forEach(l=>{const k=(l.gestorId&&l.gestorPct)?l.gestorId:'';
+    if(!grupos.has(k))grupos.set(k,[]); grupos.get(k).push(l);});
+  return [...grupos.entries()].map(([k,loans])=>{
+    const filas=loans.map(l=>{
+      const neto=loanNetoRealizado(l), comp=k?neto-gananciaPrevia(l):neto;
+      const pct=k?Math.max(0,Math.min(100,l.gestorPct)):0;
+      return {l,cobrado:loanTotalCobrado(l),capital:l.monto||0,gastos:loanGastos(l),
+        neto,comp,pct,saldo:loanRestante(l),aporte:comp*pct/100};});
+    const resultado=filas.reduce((a,f)=>a+f.neto,0);
+    const socioTotal=k?Math.max(0,Math.round(filas.reduce((a,f)=>a+f.aporte,0))):0;
+    // se reparte la parte del socio entre los préstamos que dieron ganancia, en proporción,
+    // así cada uno puede liquidarse por separado y la suma da exacto
+    const pos=filas.map(f=>Math.max(0,f.aporte)), sumPos=pos.reduce((a,x)=>a+x,0);
+    filas.forEach((f,i)=>{f.parteSocio=(k&&sumPos>0)?Math.floor(socioTotal*pos[i]/sumPos):0;});
+    if(k&&sumPos>0){const resto=socioTotal-filas.reduce((a,f)=>a+f.parteSocio,0);
+      const imax=pos.indexOf(Math.max(...pos)); filas[imax].parteSocio+=resto;}
+    return {gestorId:k,nombre:k?(socioNombre(k)||'Socio'):'',filas,resultado,socioTotal,
+      saldo:filas.reduce((a,f)=>a+f.saldo,0)};
+  });
+}
+function aplicarCierre(ids,motivo){
+  if(esSocio())return [];
+  const plan=planCierre(ids), lote=uid(), t=Date.now();
+  plan.forEach(g=>g.filas.forEach(f=>{
+    const l=f.l; l.status='cerrado';
+    l.cierre={t,motivo:motivo==='perdon'?'perdon':'nopago',lote,saldo:f.saldo,
+      ...(g.gestorId?{parteSocio:f.parteSocio}:{})};
+    saveLoan(l);}));
+  return plan;
+}
+function deshacerCierre(id){
+  const l=loan(id); if(!l||l.status!=='cerrado'||esSocio())return;
+  const lote=l.cierre&&l.cierre.lote;
+  const todos=S.loans.filter(x=>x.status==='cerrado'&&x.cierre&&x.cierre.lote===lote);
+  const pagados=todos.filter(x=>x.socioPagado);
+  if(pagados.length)return alert('No se puede deshacer: ya le liquidaste al socio '+pagados.length
+    +' de estos préstamos. Deshacé primero ese pago ("deshacer" en Ya liquidado a socios).');
+  if(!confirm(todos.length>1
+    ?`Este préstamo se cerró junto con otros ${todos.length-1}, y la ganancia se repartió sobre el total.\n\nSe van a reabrir los ${todos.length}, con sus cuotas pendientes como estaban.\n\n¿Deshacer el cierre?`
+    :'¿Reabrir este préstamo? Vuelve a quedar activo con sus cuotas pendientes como estaban.'))return;
+  todos.forEach(x=>{x.status='activo'; delete x.cierre; saveLoan(x);});
+  render();
+}
 function refreshLoanStatus(l){
-  if(l.status==='cancelado'||l.status==='renovado')return;
+  if(l.status==='cancelado'||l.status==='renovado'||l.status==='cerrado')return;
   l.status=loanRestante(l)<=0?'pagado':'activo';
 }
 function genCuotas(total,n,freq,inicio,skipSun){
@@ -1075,7 +1134,7 @@ aplicarTema();
 setInterval(()=>{if(VIEW==='inicio'||VIEW==='prestamos')render();},60000); // refresca moras
 
 /* ================= NAVEGACIÓN ================= */
-let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), calGestor='todos', iniGestor='todos', loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), cuotaOpen=new Set(), vencSort='atraso';
+let VIEW='inicio', DETAIL=null, calRef=new Date(), calSel=todayStr(), calGestor='todos', iniGestor='todos', loanFilter='activos', cliQ='', cliGestor='todos', repartoOpen=new Set(), vencOpen=new Set(), cuotaOpen=new Set(), cierreSel=new Set(), modoCierre=false, vencSort='atraso';
 $$('.tabs button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;DETAIL=null;render();});
 $('#fab').onclick=()=>{if(VIEW==='clientes')formCliente();else if(VIEW==='prestamos')formPrestamo();};
 $('#hd-tema').onclick=()=>cambiarTema(temaActual()==='claro'?'oscuro':'claro');
@@ -1151,7 +1210,7 @@ function applyBiz(){
 /* ================= VISTA: INICIO ================= */
 function cobrosDelDia(fecha,ls){ // cuotas PROGRAMADAS para ese día (lo que hay que cobrar)
   const out=[];
-  (ls||vLoans()).forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
+  (ls||vLoans()).forEach(l=>{if(l.status==='cancelado'||l.status==='renovado'||l.status==='cerrado')return;
     l.cuotas.forEach(c=>{if(c.vence===fecha)out.push({l,c});});});
   return out;
 }
@@ -1163,7 +1222,7 @@ function pagosDelDia(fecha,ls){ // pagos REALMENTE recibidos ese día, de todos 
 }
 function cobrosVencidos(ls){
   const t=todayStr(),out=[];
-  (ls||vLoans()).forEach(l=>{if(l.status==='cancelado'||l.status==='renovado')return;
+  (ls||vLoans()).forEach(l=>{if(l.status==='cancelado'||l.status==='renovado'||l.status==='cerrado')return;
     l.cuotas.forEach(c=>{if(cRestante(c)>0&&(c.vence<t||(c.vence===t&&Date.now()>dueAt(c.vence).getTime())))out.push({l,c});});});
   out.sort((a,b)=>a.c.vence<b.c.vence?-1:1);
   return out;
@@ -1202,7 +1261,7 @@ function sortGrupos(gs,mode){
   return a;
 }
 /* ----- LIQUIDACIÓN AL SOCIO: préstamos terminados cuya parte hay que pasarle ----- */
-const loanTerminado=l=>l.status==='pagado'||l.status==='renovado';
+const loanTerminado=l=>l.status==='pagado'||l.status==='renovado'||l.status==='cerrado';
 function parteDelSocio(l){const r=loanReparto(l);return r.compartido?(r.socioParteReal||0):0;}
 function liquidaciones(ls){ // {pendientes:[], pagados:[]} de préstamos terminados con socio
   const pend=[],pag=[];
@@ -1270,7 +1329,7 @@ function vLiquidaciones(ls){
 // ganancia ya embolsada de los préstamos terminados: lo cobrado por encima del capital de cada uno
 // (interés + mora + cobrador). Incluye los renovados, cuyo saldo se cobró al renovar.
 function ganadoCompletados(ls){
-  const fin=(ls||vLoans()).filter(l=>l.status==='pagado'||l.status==='renovado');
+  const fin=(ls||vLoans()).filter(loanTerminado);
   let bruto=0;
   // un grupo por persona: primero el que mira, después cada contraparte
   const mio={key:'__yo__',nombre:esSocio()?'Mi parte':'Mi parte (dueño)',ini:'YO',monto:0,items:[]};
@@ -1358,6 +1417,8 @@ function cumplimiento(clientId){
     if(l.status==='renovado')R.renovados++;
     if(l.acuerdo)R.acuerdos++;
     if(l.status==='cancelado'&&loanRestante(l)>0)R.canceladosConSaldo++;
+    if(l.status==='cerrado'&&loanRestante(l)>0&&!(l.cierre&&l.cierre.motivo==='perdon'))R.canceladosConSaldo++;
+    const fCierre=l.status==='cerrado'&&l.cierre?ymd(new Date(l.cierre.t)):null;
     if(!R.desde||l.inicio<R.desde)R.desde=l.inicio;
     l.cuotas.forEach(c=>{
       const pagos=c.pagos||[], saldada=cRestante(c)<=0;
@@ -1371,6 +1432,11 @@ function cumplimiento(clientId){
         else{e='tarde';
           const d=Math.max(1,Math.round((ult-dueAt(c.vence).getTime())/DAY));
           sumAtraso+=d; if(d>R.peorAtraso)R.peorAtraso=d;}
+      }
+      else if(!saldada&&fCierre){
+        // préstamo cerrado como estaba: lo que vencía hasta el cierre quedó sin cobrar
+        // (o perdonado); lo que vencía después ya no cuenta
+        if(c.vence<fCierre)e=(l.cierre.motivo==='perdon')?'neu':'mala';
       }
       else if(!saldada&&c.vence<hoy){
         const d=Math.round((pd(hoy).getTime()-pd(c.vence).getTime())/DAY);
@@ -1897,11 +1963,14 @@ function loanCuotasVencidasHoy(l){ // cuántas cuotas exigibles a hoy siguen imp
 }
 function loanDeudaTotal(l){ // todo lo que resta, incluidas las cuotas futuras + mora acumulada
   if(l.status==='renovado')return 0; // el saldo pasó al préstamo nuevo: acá ya no se debe nada
+  if(l.status==='cerrado')return 0;  // se cerró como estaba: lo que faltaba ya no se cobra
   if(l.status!=='activo')return loanRestante(l);
   return l.cuotas.reduce((a,c)=>a+cRestante(c)+moraDe(c)+cobradorDe(c),0);
 }
-function rowLoan(l){
+// sel: en el modo "cerrar varios", la fila muestra una casilla y tocarla la tilda
+function rowLoan(l,sel){
   const cl=client(l.clientId)||{nombre:'?'};
+  const cerrado=l.status==='cerrado';
   const renov=l.status==='renovado'; // el saldo se descontó de lo entregado en el préstamo nuevo
   const pagado=loanPagadoCuotas(l)+loanDescuentos(l);
   const pct=renov?100:(l.total?Math.min(100,Math.round(pagado/l.total*100)):0);
@@ -1911,8 +1980,11 @@ function rowLoan(l){
   const badge=l.status==='pagado'?'<span class="badge b-ok">Pagado</span>'
     :l.status==='cancelado'?'<span class="badge b-fut">Cancelado</span>'
     :l.status==='renovado'?'<span class="badge b-com">Renovado</span>'
+    :cerrado?'<span class="badge b-fut">🏁 Cerrado</span>'
     :late?'<span class="badge b-ven">Atrasado</span>':'<span class="badge b-hoy">Activo</span>';
-  return `<div class="item loanrow" data-loan="${l.id}">
+  const selec=sel&&l.status==='activo';
+  return `<div class="item loanrow" ${selec?`data-selcierre="${l.id}" style="cursor:pointer;${sel.on?'background:var(--panel-2)':''}"`:`data-loan="${l.id}"`}>
+    ${selec?`<label class="pchk" style="padding:0 4px 0 0"><input type="checkbox" data-selchk="${l.id}" ${sel.on?'checked':''}></label>`:''}
     <div class="ava ${l.tipo==='comercial'?'shop':''}">${esc(ini(cl.nombre))}</div>
     <div class="mid"><div class="t1">${esc(cl.nombre)} ${badge} ${chapaNivel(l.clientId)}</div>
       <div class="t2">${l.tipo==='comercial'?'Comercial':'Personal'} · ${FREQ[l.frecuencia]} · ${l.cuotas.length} cuotas
@@ -1920,10 +1992,11 @@ function rowLoan(l){
       ${l.acuerdo?`<div class="t2" style="color:var(--blue)">🤝 Deuda acordada en ${fmt$(l.acuerdo.monto)} · sin mora</div>`:''}
       ${debeHoy>0?`<div class="t2" style="color:var(--red);font-weight:700">🔴 Debe hoy ${fmt$(debeHoy)} · ${nVenc} cuota${nVenc===1?'':'s'}</div>`
         :renov?`<div class="t2" style="color:var(--blue)">🔄 Saldado con la renovación${loanRestante(l)>0?` (${fmt$(loanRestante(l))} pasaron al préstamo nuevo)`:''}</div>`
+        :cerrado?`<div class="t2" style="color:var(--muted)">🏁 Cerrado como estaba${loanRestante(l)>0?` · ${fmt$(loanRestante(l))} sin cobrar${l.cierre&&l.cierre.motivo==='perdon'?' (perdonado)':''}`:''}</div>`
         :l.status==='activo'?'<div class="t2" style="color:var(--green)">✅ Al día</div>':''}
       <div class="progress"><i style="width:${pct}%"></i></div></div>
     <div class="end" style="margin-right:10px"><div class="m1" style="color:var(--gold)">${fmt$(l.monto)}</div><div class="m2">prestado</div></div>
-    <div class="end"><div class="m1">${fmt$(deudaTot)}</div><div class="m2">${renov?'saldado':'debe en total · '+pct+'%'}</div></div>
+    <div class="end"><div class="m1">${fmt$(deudaTot)}</div><div class="m2">${renov?'saldado':cerrado?'cerrado · '+pct+'% cobrado':'debe en total · '+pct+'%'}</div></div>
   </div>`;
 }
 function vPrestamos(){
@@ -1934,17 +2007,74 @@ function vPrestamos(){
   const sumPrestado=ls.reduce((a,l)=>a+(l.monto||0),0);
   const sumHoy=ls.reduce((a,l)=>a+loanDebeHoy(l),0);
   const sumDeuda=ls.reduce((a,l)=>a+loanDeudaTotal(l),0);
+  const activosVista=ls.filter(l=>l.status==='activo');
+  cierreSel=new Set([...cierreSel].filter(id=>activosVista.some(l=>l.id===id)));
+  const barraCierre=esSocio()?'':(modoCierre
+    ?`<div class="list" style="padding:12px 14px;margin-bottom:10px;border:1px solid var(--gold);position:sticky;top:0;z-index:30">
+        <div class="t1" style="font-size:14px">🏁 Elegí los préstamos que querés cerrar como están</div>
+        <div class="t2" style="margin-bottom:8px">${cierreSel.size} seleccionado${cierreSel.size===1?'':'s'} · tocá cada préstamo para marcarlo</div>
+        <div class="btnrow" style="margin-top:0;flex-wrap:wrap">
+          <button class="btn mini" id="cie-ir" ${cierreSel.size?'':'disabled'}>🏁 Cerrar ${cierreSel.size||''} seleccionado${cierreSel.size===1?'':'s'}</button>
+          <button class="btn sec mini" id="cie-todos">${activosVista.length&&activosVista.every(l=>cierreSel.has(l.id))?'Quitar la selección':'Seleccionar los '+activosVista.length+' de esta vista'}</button>
+          <button class="btn sec mini" id="cie-salir">Salir</button>
+        </div></div>`
+    :(activosVista.length?`<button class="btn sec mini" id="cie-modo" style="margin:0 0 10px">🏁 Cerrar préstamos como están…</button>`:''));
   return `
   <div class="chips">
     ${[['activos','Activos'],['atrasados','Atrasados'],['pagados','Finalizados'],['todos','Todos']].map(([k,t])=>
       `<button class="${loanFilter===k?'on':''}" data-lf="${k}">${t}</button>`).join('')}
   </div>
+  ${barraCierre}
   ${ls.length?`<div class="resume balgrid">
     <div><div class="bn" style="color:var(--gold)">${fmt$(sumPrestado)}</div><div class="bl">plata prestada</div></div>
     <div><div class="bn" style="color:${sumHoy>0?'var(--red)':'var(--green)'}">${fmt$(sumHoy)}</div><div class="bl">deben hoy</div></div>
     <div><div class="bn" style="color:var(--blue)">${fmt$(sumDeuda)}</div><div class="bl">deben en total</div></div>
   </div>`:''}
-  <div class="list" style="margin-top:12px">${ls.length?ls.map(rowLoan).join(''):'<div class="empty">No hay préstamos en esta vista.<br>Tocá + para crear uno.</div>'}</div>`;
+  <div class="list" style="margin-top:12px">${ls.length?ls.map(l=>rowLoan(l,modoCierre?{on:cierreSel.has(l.id)}:null)).join(''):'<div class="empty">No hay préstamos en esta vista.<br>Tocá + para crear uno.</div>'}</div>`;
+}
+// la ventana de cierre: muestra la cuenta antes de confirmar
+function formCierre(ids){
+  if(esSocio())return alert('Cerrar préstamos lo hace el dueño.');
+  const plan=planCierre(ids);
+  if(!plan.length)return alert('No hay préstamos activos para cerrar.');
+  const n=plan.reduce((a,g)=>a+g.filas.length,0), saldo=plan.reduce((a,g)=>a+g.saldo,0);
+  const signo=x=>x<0?`<span style="color:var(--red)">−${fmt$(-x)}</span>`:`<span style="color:var(--green)">${fmt$(x)}</span>`;
+  modal(`<h3>🏁 Cerrar ${n} préstamo${n===1?'':'s'} como está${n===1?'':'n'}</h3>
+  <div class="hint">Se terminan con lo cobrado hasta hoy: dejan de sumar mora y salen de cobros y vencidos.
+  La ganancia es lo cobrado menos lo prestado y los gastos${plan.some(g=>g.gestorId&&g.filas.length>1)?', y con cada socio se reparte sobre el <b>total</b>: las pérdidas de unos se descuentan de las ganancias de otros':''}.</div>
+  ${plan.map(g=>`
+    <h2 style="margin-top:14px">${g.gestorId?'🤝 De '+esc(g.nombre):'🙋 Tuyos (sin socio)'}</h2>
+    <div class="list">${g.filas.map(f=>{const cl=client(f.l.clientId)||{nombre:'?'};
+      return `<div class="item" style="cursor:default">
+        <div class="mid"><div class="t1">${esc(cl.nombre)}</div>
+          <div class="t2 libre">cobró ${fmt$(f.cobrado)} de ${fmt$(f.capital)} prestados${f.gastos?` + ${fmt$(f.gastos)} de gastos`:''}${f.saldo>0?` · quedan ${fmt$(f.saldo)} sin cobrar`:''}</div></div>
+        <div class="end"><div class="m1">${signo(f.neto)}</div><div class="m2">${f.neto<0?'pérdida':'ganancia'}</div></div>
+      </div>`;}).join('')}</div>
+    <div class="resume" style="margin-top:8px">Resultado: <b>${signo(g.resultado)}</b><br>
+      ${g.gestorId
+        ?(g.socioTotal>0
+          ?`A ${esc(g.nombre)} le toca <b>${fmt$(g.socioTotal)}</b> y a vos el resto. Va a aparecer en <b>Pagar a socios</b>.`
+          :`No hay ganancia para repartir: ${esc(g.nombre)} no cobra nada y no pone nada. ${g.resultado<0?'La pérdida la absorbés vos.':''}`)
+        :(g.resultado<0?'La pérdida la absorbés vos.':'Es toda tuya.')}</div>`).join('')}
+  ${saldo>0?`
+    <label>Los ${fmt$(saldo)} que quedan sin cobrar, ¿cómo se registran?</label>
+    <div class="seg" id="cie-motivo">
+      <button data-v="nopago" class="on">🔴 Dejó de pagar</button>
+      <button data-v="perdon">🤝 Se le perdonó</button>
+    </div>
+    <div class="hint" id="cie-motivohint">Cuenta en el historial del cliente: queda marcado como Problemático.</div>`:''}
+  <button class="btn" id="cie-ok" style="margin-top:16px">🏁 Cerrar ${n} préstamo${n===1?'':'s'}</button>`);
+  let motivo='nopago';
+  $$('#cie-motivo button').forEach(b=>b.onclick=()=>{motivo=b.dataset.v;
+    $$('#cie-motivo button').forEach(x=>x.classList.toggle('on',x===b));
+    $('#cie-motivohint').textContent=motivo==='perdon'
+      ?'No le baja la calificación: esas cuotas cuentan como saldadas por acuerdo.'
+      :'Cuenta en el historial del cliente: queda marcado como Problemático.';});
+  $('#cie-ok').onclick=()=>{
+    if(!confirm(`¿Cerrar ${n} préstamo${n===1?'':'s'}? Se puede deshacer desde la ficha de cada uno mientras no le hayas pagado al socio.`))return;
+    aplicarCierre(ids,motivo);
+    cierreSel=new Set(); modoCierre=false; closeModal(); render();
+  };
 }
 function vPrestamo(id){
   const l=loan(id); if(!l)return '<div class="empty">Préstamo no encontrado</div>';
@@ -1955,6 +2085,10 @@ function vPrestamo(id){
   return `
   <button class="back" data-go="prestamos">← Préstamos</button>
   ${l.renovadoDe&&loan(l.renovadoDe)?`<div class="list" style="padding:11px 14px;margin-bottom:12px"><div class="t2" data-loan="${l.renovadoDe}" style="cursor:pointer">🔄 Renovación de un préstamo anterior${l.refinanciado?` · se refinanció ${fmt$(l.refinanciado)}`:''} · <span style="color:var(--gold)">ver original ›</span></div></div>`:''}
+  ${l.status==='cerrado'&&l.cierre?`<div class="list" style="padding:11px 14px;margin-bottom:12px;border:1px solid var(--line)">
+    <div class="t1">🏁 Cerrado como estaba el ${dLong(ymd(new Date(l.cierre.t)))}</div>
+    <div class="t2">${loanRestante(l)>0?`Quedaron ${fmt$(loanRestante(l))} sin cobrar · ${l.cierre.motivo==='perdon'?'se le perdonó':'dejó de pagar'}`:'No quedó nada sin cobrar'}${S.loans.filter(x=>x.cierre&&x.cierre.lote===l.cierre.lote).length>1?` · se cerró junto con otros ${S.loans.filter(x=>x.cierre&&x.cierre.lote===l.cierre.lote).length-1} y la ganancia se repartió sobre el total`:''}</div>
+    ${esSocio()?'':`<div class="t2" style="margin-top:6px"><span class="undo" data-reabrir="${id}">↩️ deshacer el cierre</span></div>`}</div>`:''}
   ${l.status==='renovado'?`<div class="list" style="padding:11px 14px;margin-bottom:12px">
     ${l.renovadoEn&&loan(l.renovadoEn)?`<div class="t2" data-loan="${l.renovadoEn}" style="cursor:pointer">🔄 Este préstamo fue renovado · <span style="color:var(--gold)">ver préstamo nuevo ›</span></div>`:'<div class="t2">🔄 Este préstamo fue renovado</div>'}
     ${esSocio()?'':`<div class="t2" style="margin-top:6px"><span class="undo" data-desrenov="${id}">↩️ deshacer la renovación</span></div>`}</div>`:''}
@@ -2090,6 +2224,7 @@ function vPrestamo(id){
   ${l.status==='activo'?`<button class="btn" data-renovar="${id}" style="margin-top:10px;background:var(--gold);color:var(--onColor)">🔄 Renovar préstamo</button>`:''}
   ${l.status==='activo'&&!l.acuerdo?`<button class="btn sec" data-acuerdo="${id}" style="margin-top:10px">🤝 Fijar la deuda a un monto acordado</button>`:''}
   <div class="btnrow">
+    ${l.status==='activo'&&!esSocio()?`<button class="btn sec" data-cerrar="${id}">🏁 Cerrar como está</button>`:''}
     ${l.status==='activo'?`<button class="btn red" data-cancel-loan="${id}">Cancelar préstamo</button>`:''}
     <button class="btn red" data-del-loan="${id}">🗑 Eliminar</button>
   </div>`;
@@ -4404,6 +4539,18 @@ function bindView(){
   $$('[data-delgasto]').forEach(b=>b.onclick=e=>{e.stopPropagation();
     const[id,g]=b.dataset.delgasto.split('|');borrarGasto(id,g);});
   $$('[data-lf]').forEach(b=>b.onclick=()=>{loanFilter=b.dataset.lf;render();});
+  // cerrar como está
+  $$('[data-cerrar]').forEach(b=>b.onclick=()=>formCierre([b.dataset.cerrar]));
+  $$('[data-reabrir]').forEach(b=>b.onclick=e=>{e.stopPropagation();deshacerCierre(b.dataset.reabrir);});
+  {const m=$('#cie-modo');if(m)m.onclick=()=>{modoCierre=true;cierreSel=new Set();render();};
+   const x=$('#cie-salir');if(x)x.onclick=()=>{modoCierre=false;cierreSel=new Set();render();};
+   const ir=$('#cie-ir');if(ir)ir.onclick=()=>formCierre([...cierreSel]);
+   const to=$('#cie-todos');if(to)to.onclick=()=>{
+     const vis=$$('[data-selcierre]').map(d=>d.dataset.selcierre);
+     const todos=vis.length&&vis.every(id=>cierreSel.has(id));
+     cierreSel=todos?new Set():new Set(vis); render();};}
+  $$('[data-selcierre]').forEach(d=>d.onclick=e=>{e.preventDefault();
+    const id=d.dataset.selcierre; cierreSel.has(id)?cierreSel.delete(id):cierreSel.add(id); render();});
   $$('[data-vs]').forEach(b=>b.onclick=()=>{vencSort=b.dataset.vs;render();});
   $$('[data-cg]').forEach(b=>b.onclick=()=>{cliGestor=b.dataset.cg;render();});
   $$('[data-calg]').forEach(b=>b.onclick=()=>{calGestor=b.dataset.calg;render();});
